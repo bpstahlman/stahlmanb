@@ -19,6 +19,13 @@ promptinit
 
 # End of lines added by compinstall
 
+# Allow use of `#' in normal mode to comment a line.
+# Note: Zsh's edit buffer stack may eventually obviate need for this...
+setopt interactivecomments
+
+# zed editor is *extremely* useful for editing both files and functions (-F)
+autoload -U zed
+
 # Load version control utilities.
 autoload -Uz vcs_info
 # Disable all but git and svn for reasons of efficiency.
@@ -36,3 +43,8 @@ zstyle ':vcs_info:(sv[nk]|bzr):*' branchformat '%b%F{1}:%F{3}%r'
 precmd () { vcs_info }
 # Note: prompt_subst must be set for this to work.
 PS1='%F{5}[%F{2}%n%F{5}] %F{3}%3~ ${vcs_info_msg_0_}%f%# '
+
+# Source stuff that needs to be available for any script (even non-interactive).
+[[ -a ~/.zprofile ]] && . ~/.zprofile
+
+# TODO: Figure out strategy for determining when it's appropriate to switch to ~
