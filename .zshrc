@@ -48,3 +48,36 @@ PS1='%F{5}[%F{2}%n%F{5}] %F{3}%3~ ${vcs_info_msg_0_}%f%# '
 [[ -a ~/.zprofile ]] && . ~/.zprofile
 
 # TODO: Figure out strategy for determining when it's appropriate to switch to ~
+
+# zle widget bindings
+
+USE_META_FOR_SEARCH_MAPS=1
+if (( ${+USE_META_FOR_SEARCH_MAPS} )); then
+	# Remap flow-control stop to C-^ (requires Shift) to free up C-s for more commonly used widgets.
+	# Note: flow-control start retains default binding: C-q.
+	stty stop '^^'
+	bindkey -M viins '^r' history-beginning-search-backward
+	bindkey -M viins '^s' history-beginning-search-forward
+
+	bindkey -M vicmd '^r' history-incremental-search-backward
+	bindkey -M vicmd '^s' history-incremental-search-forward
+else
+	bindkey -M viins '\er' history-beginning-search-backward
+	bindkey -M viins '\es' history-beginning-search-forward
+
+	bindkey -M vicmd '\er' history-incremental-search-backward
+	bindkey -M vicmd '\es' history-incremental-search-forward
+fi
+
+bindkey -M vicmd '#' vi-pound-insert
+bindkey -M viins '\eg' get-line
+bindkey -M viins '\ep' push-line-or-edit
+# Note: When history scrolling has populated the editing buffer, we'll often be in cmd mode when this functionality is
+# needed. (Ideally, would also end up in cmd mode, but that's not how it works).
+bindkey -M viins '^O' accept-line-and-down-history
+bindkey -M vicmd '^O' accept-line-and-down-history
+
+# Question: Is this needed? ^L is default clear-screen. This one's just for redisplaying buffer in incremental search.
+bindkey -M vicmd '^xr' redisplay
+
+# vim:tw=120
