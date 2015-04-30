@@ -1,0 +1,12 @@
+#! /usr/bin/zsh
+
+# Assumption: Tied path var has already been given the uniqueness attribute.
+path=(/cygdrive/c/Apps/HashiCorp/Vagrant/bin /cygdrive/c/Apps/Packer $path)
+
+# Provide easy way to get to various project dirs.
+# TODO: Do I want autocd?
+setopt cdablevars
+hash -d jwc=~/git/jedis/collaboration/web_chat
+hash -d isef=~/git/asec
+
+# TODO: Somehow allow gvim to run from command line.

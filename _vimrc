@@ -14,6 +14,25 @@ set nobackup
 set guioptions-=m
 set guioptions-=T
 
+" PATH adjustment for Cygwin...
+if has('win32') || has('win64')
+	" If Cygwin bin dir comes after c:/Windows/system32 (or a similar
+	" path), move it before...
+	" Explanation: Managed pc policies may prepend System PATH to User
+	" PATH, and I may have no control over what's in System PATH. If the
+	" resulting PATH has Windows system dir before Cygwin, stuff like
+	" `find' won't work.
+	let re = '\c'
+		\.'\%(^\|;\)\@<='
+		\.'\(c:[/\\]windows\%([^/\\]\&\f\)*[/\\]system\%([^/\\]\&\f\)*\)'
+		\.'\(;.*\);\@<='
+		\.'\(c:[/\\]cygwin[/\\]bin\%(;\|$\)\)'
+	if $PATH =~ re
+		" Rotate so that Cygwin/bin comes first.
+		let $PATH = substitute($PATH, re, '\3\1\2', '')
+	endif
+endif
+
 " Note: The following cscope stuff was copied from Jason Duell's vimrc,
 " referenced from the Vim/Cscope tutorial:
 " http://cscope.sourceforge.net/cscope_vim_tutorial.html
