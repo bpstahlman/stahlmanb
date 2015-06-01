@@ -14,6 +14,9 @@ set nobackup
 set guioptions-=m
 set guioptions-=T
 
+" hls is annoying to me, especially for small, common text strings.
+set nohls
+
 " PATH adjustment for Cygwin...
 if has('win32') || has('win64')
 	" If Cygwin bin dir comes after c:/Windows/system32 (or a similar

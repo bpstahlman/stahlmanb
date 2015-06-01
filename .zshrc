@@ -52,7 +52,7 @@ PS1='%F{5}[%F{2}%n%F{5}] %F{3}%3~ ${vcs_info_msg_0_}%f%# '
 # zle widget bindings
 
 USE_META_FOR_SEARCH_MAPS=1
-if (( ${+USE_META_FOR_SEARCH_MAPS} )); then
+if (( ! ${+USE_META_FOR_SEARCH_MAPS} )); then
 	# Remap flow-control stop to C-^ (requires Shift) to free up C-s for more commonly used widgets.
 	# Note: flow-control start retains default binding: C-q.
 	stty stop '^^'
@@ -67,6 +67,10 @@ else
 
 	bindkey -M vicmd '\er' history-incremental-search-backward
 	bindkey -M vicmd '\es' history-incremental-search-forward
+
+	# Note: Could alternatively use vi-repeat-search and vi-rev-repeat-search
+	bindkey -M isearch '\er' history-incremental-search-backward
+	bindkey -M isearch '\es' history-incremental-search-forward
 fi
 
 bindkey -M vicmd '#' vi-pound-insert
