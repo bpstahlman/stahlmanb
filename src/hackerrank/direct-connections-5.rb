@@ -109,9 +109,6 @@ def sum_cable_len(cities)
           end
           dup[:n] %= 1_000_000_007 if dup[:n] >= 1_000_000_007
           dup[:cable_len] %= 1_000_000_007 if dup[:cable_len] >= 1_000_000_007
-          # TODO: Figure this out - trying to avoid updating _cum with this, but will need to add whatever's added in
-          # secondary traversal.
-          cable_len = 0
         end
         # Fix starting point of secondary traversal (which needs to be optimized).
         start_idx = cached.city_idx + 1
