@@ -95,21 +95,6 @@ def sum_cable_len(cities)
         n = n % 1_000_000_007 if n >= 1_000_000_007
         cable_len = cable_len_base + n * cached_pos_diff
         cable_len %= 1_000_000_007 if cable_len >= 1_000_000_007
-        if dup
-          # dup can be bool or object: create (and add) or update (already-added) hash accordingly.
-          # Note: cable_len calculated above doesn't account for sheaf from earlier duplicate city. Do so here.
-          if dup == true
-            dup = cached.dup = {
-              n: n + 1,
-              cable_len: cable_len + cached_pos_diff
-            }
-          else
-            dup[:n] += 1
-            dup[:cable_len] += cached_pos_diff
-          end
-          dup[:n] %= 1_000_000_007 if dup[:n] >= 1_000_000_007
-          dup[:cable_len] %= 1_000_000_007 if dup[:cable_len] >= 1_000_000_007
-        end
         # Fix starting point of secondary traversal (which needs to be optimized).
         start_idx = cached.city_idx + 1
       end
@@ -129,6 +114,23 @@ def sum_cable_len(cities)
       }
       n += n_acc
       n = n % 1_000_000_007 if n >= 1_000_000_007
+      if dup
+        # dup can be bool or object: create (and add) or update (already-added) hash accordingly.
+        # Note: cable_len calculated above doesn't account for sheaf from earlier duplicate city. Do so here.
+        if dup == true
+          dup = cached.dup = {
+            n: n + 1,
+            cable_len: cable_len + cached_pos_diff
+          }
+        else
+          # Arrrggghhh!!!! This one needs to account for stuff added in loop!!!!!
+          # !!!!!!! Pick up here !!!!!!!!
+          dup[:n] = n + 1
+          dup[:cable_len] += cached_pos_diff
+        end
+        dup[:n] %= 1_000_000_007 if dup[:n] >= 1_000_000_007
+        dup[:cable_len] %= 1_000_000_007 if dup[:cable_len] >= 1_000_000_007
+      end
 
       if !cached || cached_pop != pop
         # Add to cache
@@ -144,12 +146,23 @@ def sum_cable_len(cities)
         cached.cable_len_cum %= 1_000_000_007 if cached.cable_len_cum >= 1_000_000_007
       end
     }
+    puts "---"
     rbt.each do |pop, info|
       p "#{pop}: #{info.inspect}"
       sum += pop * info.cable_len_cum
       sum %= 1_000_000_007 if sum >= 1_000_000_007
     end
-    puts "sum = #{sum}"
+    # Discovery!: Rollover appears to be where things are going wrong!
+    # WORKS! (answer 951_844_963 - note how close to 1_000_000_007)
+    # 8
+    # 75372245 19269031 83919535 25868562 57536417 94649792 90987958 53798398
+    # 7947 5330 3529 2703 253 9431 8457 5330
+    #
+    # FAILS! (good = 994713138, bad = 693615517)
+    # 9
+    # 75372245 19269031 9049583 83919535 25868562 57536417 94649792 90987958 53798398
+    # 7947 5330 5369 3529 2703 253 9431 8457 5330
+    #puts "sum = #{sum}"
   end
   sum
 end
@@ -166,11 +179,14 @@ puts "#{Time.now.to_f}: Starting!"
     a[0] <=> b[0]
   end
 
+  puts cities.map {|v| v[0]}.join " "
+  puts cities.map {|v| v[1]}.join " "
+
   cable_dist = sum_cable_len cities
-  puts "#{Time.now.to_f}: Finished test case #{tc}: # cities=#{n}"
+  #puts "#{Time.now.to_f}: Finished test case #{tc}: # cities=#{n}"
   puts cable_dist % 1_000_000_007
 }
-puts "#{Time.now.to_f}: Finished!"
+#puts "#{Time.now.to_f}: Finished!"
 
 
 # vim:ts=2:sw=2:et:tw=120
