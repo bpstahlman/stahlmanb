@@ -1,0 +1,256 @@
+#! /bin/bash
+
+declare -A def=(
+)
+# dir/Track_1.mp3
+# --output-format FMT
+#     Obviates need for replace-ws and basename
+# --replace-ws CHAR
+# --basename NAME
+# Rethinking...: --output-format is always -o to mp3splt. We add id tags
+# before splitting so that it can contain metadata specifiers. To allow user
+# to specify no spaces in directory name...
+# --passthrough-format
+# --replace-whitespace=CHAR
+# --output-track-fmt (support %n, and possibly %t)
+# New approach (01Oct2015)
+# --replace-ws=CHAR
+# Process %b specially in the output-format if --replace=ws is set:
+# specifically, replace the %b with the album name with all runs of whitespace
+# replace by STR (typically `_').
+declare -A cfg=(
+	[silence-thresh]=-40
+	[remove-silence]=
+	[num-tracks]=
+	[infile]=./split.cfg
+	[output-format]=@b/@f_@n
+	[replace-ws]=
+	[basename]=
+	[dry-run]=
+)
+
+declare -a Meta_tags=(artist year genre)
+
+process_opts() {
+	local TEMP=$(getopt -o t:s:i:n:f:w:b:rd --long \
+		silence-thresh:,infile:,num-tracks:,remove-silence,output-format:,replace-ws:,basename:,dry-run -n "$0" -- "$@")
+
+	if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+	# Note the quotes around `$TEMP': they are essential!
+	# BPS: Actually, they're unnecessary.
+	eval set -- "$TEMP"
+
+	while true ; do
+		case "$1" in
+			-t|--silence-thresh)
+				cfg[silence-thresh]=$2
+				shift 2 ;;
+			-i|--infile)
+				cfg[infile]=$2
+				shift 2 ;;
+			-n|--num-tracks)
+				cfg[num-tracks]=$2
+				shift 2 ;;
+			-r|--remove-silence)
+				cfg[remove-silence]=1
+				shift ;;
+			-f|--output-format)
+				cfg[output-format]=$2
+				shift 2 ;;
+			-w|--replace-ws)
+				cfg[replace-ws]=$2
+				shift 2 ;;
+			-b|--basename)
+				cfg[basename]=$2
+				shift 2 ;;
+			-d|--dry-run)
+				cfg[dry-run]=1
+				shift ;;
+			--) shift ; break ;;
+			*) echo "Internal error!" ; exit 1 ;;
+		esac
+	done
+	# Note: We don't use extra arguments: everything is driven by options and config file.
+
+	#echo "Remaining arguments:"
+	#for arg do echo '--> '"\`$arg'" ; done
+}
+
+show_opts() {
+	echo "-- Options --"
+	for k in "${!cfg[@]}"; do
+		echo "$k=${cfg[$k]}"
+	done
+}
+
+process_album_side() {
+	local -i i=1
+	local k t
+	echo "Album: ${tags[album]}"
+	echo -e "\tFile: ${tags[file]}"
+	for k in "${Meta_tags[@]}" ; do
+		if [[ -n ${tags[$k]} ]]; then
+			echo -e "\t\t$k:\t${tags[$k]}"
+		fi
+	done
+	echo -e "\t\t-- Tracks --"
+	for t in "${tracks[@]}"; do
+		echo -e "\t\t$((i++)).\t$t"
+	done
+
+	# Construct the mp3splt command line
+	# -s silence detection
+	# -p parameters
+	#     th silence threshold (signed db)
+	#     nt # of tracks
+	#     rm remove silence
+	# -o output format
+	local th_arg=${cfg[silence-thresh]:+th=${cfg[silence-thresh]}}
+	local nt_arg=${cfg[num-tracks]:+nt=${cfg[num-tracks]}}
+	local rm_arg=${cfg[remove-silence]:+rm}
+
+	local out_fmt=${cfg[output-format]}
+	local album=${tags[album]}
+
+	# TODO - Don't just stick this here...
+	shopt -s extglob
+	if [[ -n "${cfg[replace-ws]}" ]]; then 
+		# Replace the %b (album) spec with the actual album name, but with
+		# runs of whitespace collapsed to replace-ws STR
+		out_fmt=${out_fmt//@b/${album//+([[:space:]])/${cfg[replace-ws]}}}
+	fi
+	echo mp3splt -s -p \
+		"th=${cfg[silence-thresh]}${cfg[num-tracks]:+,nt=${cfg[num-tracks]}}${cfg[remove-silence]:+,rm}" \
+		-o "$out_fmt" "${tags[file]}"
+
+}
+
+fatal() {
+	echo >&2 "Fatal error: $@."
+	echo >&2 "Exiting..."
+	exit 1
+}
+
+# Make some things available in functions.
+declare -A tags
+declare -a tracks
+main() {
+	[[ ${cfg[dry-run]} ]] && show_opts
+	# States: init, meta, tracks
+	local st=init
+	local re_kv='^\s*([a-zA-Z_]+)\s*=\s*(.*)'
+	local re_com_or_blank='^\s*(#|$)'
+	local re_track='^\s*(.*\S)'
+	cat "${cfg[infile]}" | {
+	# Inhibit word splitting in the read.
+	IFS=
+	while read line; do
+		# Line types: track, kv (com superfluous)
+		local lt
+		local k v
+		if [[ $line =~ $re_kv ]]; then
+			lt=kv
+			k=${BASH_REMATCH[1]}
+			v=${BASH_REMATCH[2]}
+		elif [[ $line =~ $re_com_or_blank ]]; then
+			# Ignore comments and blank lines.
+			continue
+		elif [[ $line =~ $re_track ]]; then
+			lt=track
+			v=${BASH_REMATCH[1]}
+		else
+			lt=
+		fi
+		# Handle any old file before starting new...
+		if [[ $st == tracks && $lt == kv &&
+			( $k == file || $k == album ) ]]; then
+			process_album_side
+		fi
+		if [[ ( $st == init || $st == tracks ) &&
+			$lt == kv && $k == album ]]; then
+			# Start of new album
+			st=meta
+			tags=()
+			tags[album]=$v
+		elif [[ ( $st == meta || $st == tracks ) &&
+			$lt == kv && $k == file ]]; then
+			# Start of new file
+			st=tracks
+			tags[file]=$v
+			tracks=()
+		elif [[ $st == meta && $lt == kv ]]; then
+			# Non-file, non-album tag
+			tags[$k]=$v
+		elif [[ $st == tracks && $lt == track ]]; then
+			tracks+=($v)
+		else
+			# Shouldn't get here!
+			#echo "st=$st, lt=$lt, k=$k"
+			fatal "Unexpected input: $line"
+		fi
+
+	done }
+	# Generally, there will be one more file (side) to process at this point.
+	if [[ $st == tracks ]]; then
+		process_album_side
+	fi
+}
+
+process_opts "$@"
+main
+
+if false; then
+	case $st in
+		init)
+			# Can be only album.
+			if [[ $lt == kv && $k == album ]]; then
+				tags=()
+				tags[album]=$v
+				st=meta
+			else
+				fatal "Unexpected input: $line"
+			fi ;;
+		meta)
+			case $lt in
+				kv)
+					case $k in
+						file)
+							st=tracks ;&
+						artist|year|genre)
+							tags[$k]=$v ;;
+						*)
+							fatal "Unexpected input: $line" ;;
+					esac ;;
+				*)
+					# When in meta st, nothing but meta tags are legal
+					# till the file= that transitions us to tracks st.
+					fatal "Unexpected input: $line" ;;
+			esac ;;
+		tracks)
+			case $lt in
+				track)
+					tracks+=($v) ;;
+				kv)
+					if [[ $k == album ]]; then
+						tags=()
+						tags[album]=$v
+						st=meta
+					else
+						fatal "Unexpected input: $line"
+					fi
+					;;
+			esac
+			;;
+	esac
+fi
+#mp3splt -s -p th=-20,nt=4,rm -o test20db/@f_@n Getz_Meets_Mulligan_in_HI-FI_Side1.mp3 
+#mp3splt -r -p th=-48 -o @f_trimmed *.mp3
+#mp3splt -r -p th=-48 -o trimmed Getz_Meets_Mulligan_in_HI-FI_Side1.mp3
+#mp3splt -r -p th=-40 -o trimmed_40 Getz_Meets_Mulligan_in_HI-FI_Side1.mp3
+#mp3splt -r -p th=-40 -o @f_trimmed *.mp3
+#for f in *_trimmed.mp3; do mv $f ${f/_trimmed}; done
+#mp3splt -s -p th=-40,nt=4,rm -o @b/@f_@n Getz_Meets_Mulligan_in_HI-FI_Side1.mp3 
+#mp3splt -s -p th=-40,nt=3,rm -o @b/@f_@n Getz_Meets_Mulligan_in_HI-FI_Side2.mp3 
+
+# vim:ts=4:sw=4:noet:tw=78
