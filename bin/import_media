@@ -1,0 +1,916 @@
+#! /bin/bash
+
+# Implement 2 types of fatal errors
+#  1. Usage - Error indicates user doesn't know how to run the program (e.g., no directory args)
+#  2. Help  - Error indicates user doesn't understand the options (i.e., simply showing usage info wouldn't help)
+#  Note: I've verified that sed and grep output different stuff in these 2 cases:
+	# Examples:
+	# grep       ==>
+	# Usage: grep [OPTION]... PATTERN [FILE]...
+	# Try `grep --help' for more information.
+	# grep -A b  ==>
+	# grep: b: invalid context length argument
+	# grep -A    ==>
+	# grep: option requires an argument -- 'A'
+	# Usage: grep [OPTION]... PATTERN [FILE]...
+	# Try `grep --help' for more information.
+	# Note: Usage shown here because user didn't know how the -A option worked.
+	# grep       ==>
+	# Usage: grep [OPTION]... PATTERN [FILE]...
+	# Try `grep --help' for more information.
+	
+# Near-term TODO list
+# Go through test run log file, clearing up each class of error and warning...
+# <<< 09Oct2011 >>>
+# Note: All other fixes needed before initial use have been made I think...
+# <<< 29May2011 >>>
+# --TODO--
+# -Possibly add warning (and associated suppression) for EXIF dates prior to earliest-date
+# -For files that appear to be duplicate despite differing basenames, perhaps show the original?
+#  Note: Not high priority, as information is already displayed in list of
+#  discarded dups; however, it might be nice to have something grab user's
+#  attention: e.g., asterisk before lines containing dups with differing
+#  basenames, and some conditional text explaining the meaning of the asterisk.
+# -Turn debug print of option settings into a formal log option
+# -Look at having option to log a few more things: E.g.,
+#    -EXIF inspection (e.g., which method used on a per-file basis)
+#    -Complete list of files with all relevant metadata (before culling, used for debug)
+#     Note: Could have option that allowed this to be dumped to a user-specified file.
+
+# --DONE--
+# -Avoid changing modification/status time when filenames are adjusted (e.g., uniquified).
+#  Fix: Used --preserve=timestamps
+# -Add option to specify earliest plausible date; any EXIF dates before this
+#  will be ignored in favor of the OS file dates...
+# Design Decision Needed: Is day of the month proper granularity for
+# destination folders? Could lead to lots of directories with only 1 or 2
+# files. Would it be better to stop subdividing at the month?
+# Decision: Stop at month.
+# -Uniquifying warning should perhaps state what's in conflict?
+#  Fix: I was already displaying both old and new basenames: added the destination folder.
+# -For warning... "WARNING: Discarding file that appears to be duplicate..." (Should we list the original?)
+#  Fix: Converted from awk to bash. Test needed.
+# -Exif errors - should we send them to /dev/null or allow them to be logged somehow?
+#  Example: `Error: Directory Canon: Next pointer is out of bounds; ignored.'
+#           Not sure what this means, and for debugging, I'd like to know...
+#           What sort of high-detail logging could be employed for this?
+#  Now they're captured and logged if permitted by suppression option.
+# -Bad directory: 0000/00/00 - where does this come from? We're trying to create it as directory!
+#  Answer: exiv2 is returning DateTimeOriginal of 0000:00:00 00:00:00
+#  Fix: Detect exact string, discarding this date in preference for filesystem
+#  times, and perhaps output something to stderr to indicate the problem.
+#  TODO: Fixed by testing for date less than 1969/12/31; however, need to
+#  decide whether to warn about this; I'm thinking not. Currently, we silently
+#  discard and defer to mtime or ctime.
+# -Implement new strategy for pipefail: i.e., make no assumptions about it
+#  anywhere. If I need it to be set or unset, then do it explicitly at the
+#  point where it matters. Currently, there are several places where an
+#  adjustment is needed:
+#    -within exif function
+#    -md5sum/sha1sum runs
+#  Note: I'm leaning toward outputting explicit error in both cases. Had been
+#  thinking of just letting the exif error flow naturally to stderr, but I'd
+#  like to have file-specific error message.
+#  Follow-up Note: I can let the error flow to stderr (without attempting to
+#  catch), then detect error status and output a file-specific error (e.g.,
+#  "skipping file such and such due to md5sum error", noting that the error has
+#  already been displayed).
+#  Caveat: Because there's a suppression option for exif, I can't let if flow
+#  to stderr if suppression is desired.
+# -Standardize on WARNING or Warning (offender was in awk script)
+# -md5sum/sha1sum errors - caused by files with owner 500 and no permissions for group/other.
+#  Possible solution: run script with sudo.
+#  Decision: Simply allow checksum errors to be output to stderr.
+#  Rationale: I should be running the script in such a way that they don't
+#  occur (e.g., with sudo), and I need to know if they are occurring.
+# -Where does the following error come from?
+#  Warning: JPEG format error, rc = 5
+#  Answer: It's an exiv2 error
+#  TODO: Decide how to treat logging of md5sum/sha1sum errors, as well as exif
+#  read errors. E.g., do any of the log-level/error suppression options apply?
+#  Answer: There's a suppression option for exif error, but not for md5sum, as
+#  the algorithm really depends upon checksum, to the point that we'll skip
+#  processing a file for which we can't obtain checksum; thus, always output
+#  error for this.
+# TODO: Use vim :global to make sure all classes of warning/error are examined.
+
+
+# List of summary items: (TODO - verify that they're all there.)
+#   -# of source files (checksum loop)
+#   -# of source files discarded for being too small
+#   -# of duplicates discarded (awk script - already done)
+#   -# of video vs. photo files (effective date loop)
+#   -# of files for which we used the various types of timestamps (e.g., EXIF metadata vs. mtime/ctime)
+#   -# of problems with dest dir (e.g., permissions, non-dir file, or inability to create)
+#   -# of dest dirs created
+#   -# of files whose names had to be "uniquified" to prevent collision in dest dir
+#   -# of files that have already been imported
+#   -# of files copied
+#   -# of file copy errors
+
+# Passing flag options to functions:
+# If options need to be supplied to function, pass them as first positional
+# param, preceded by a dash (`-'). If the first non-option arg begins with a
+# dash, be sure to precede it with a `-' (null flags) or `--'.
+
+# Option defaults and associated constants
+# Boolean
+#   In some contexts...
+#     t=true, f=false
+#   ...in other contexts...
+#     existence ==> true else false
+# Numeric
+
+# h, help
+O_help=f
+# d, dry-run
+O_dry_run=f
+# e, earliest-date
+# Default to last day prior to unix epoch
+O_earliest_date=1969/12/31
+# l, log-lvl
+# 0 - log nothing
+# 1 - log (departure from) each major pipeline stage
+#     Note: Logging entry to pipeline stage is pointless, as all are entered
+#     roughly simultaneously (in a non-deterministic order).
+# 2 - log minor anomalies pertaining to a particular file (e.g., duplicate or previously imported)
+# 3 - log commands (e.g., directory creation, file copy)
+declare -i LOGLVL_NOTHING=0
+declare -i LOGLVL_STAGES=1
+declare -i LOGLVL_FILEINFO=2 # TODO - remove
+declare -i LOGLVL_COMMANDS=3
+declare -i C_MAX_LOGLVL=$LOGLVL_COMMANDS
+declare -i O_log_lvl=$LOGLVL_COMMANDS
+# i, suppress-info=[asdDfue]
+# A string of single-letter flags indicating the set of conditions for which
+# realtime notification to stderr is *not* desired.
+# Option processing: flag set will be converted into an associative array with
+# the indicated keys: key existence implies suppression; by default, nothing is
+# suppressed.
+# a - all   - suppress all info (when this is set, all other flags ignored)
+# s - small - file too small
+# d - dup   - duplicate files (multiples) discarded
+#   TODO: Consider whether to have a separate suppression option for apparent duplicates with differing basenames. For now, let "dup" govern.
+# D - dir   - problem creating or writing to directory
+# f - file  - failed to copy file
+# u - uniq  - uniquified files
+# e - exif  - problems using exif utility to obtain effective date
+# Define constant mapping of short options to hash keys to mitigate risk of
+# error
+declare -A C_suppress_info_names=([a]=all [s]=small [d]=dup [D]=dir [f]=file [u]=uniq [e]=exif)
+declare -A O_suppress_info
+# stop-on-error
+# TODO: Not sure how easy this would be to implement. Setting pipefail affects
+# pipeline's exit status, but error in upstream stage won't cause premature
+# termination of downstream stages; i.e., no C-style short-circuit. Perhaps
+# just force user to CTRL-C if he doesn't like what's happening...
+O_stop_on_error=t # TODO - eventually remove
+# r, remove-after-copy
+O_remove_after_copy=f # TODO - eventually enable by default
+
+# Define default target (destination) locations for photos and videos, but
+# allow user to override
+# Define constant mapping of short options to hash keys to mitigate risk of
+# error
+declare -A C_dest_dir_names=([p]=photo [m]=video)
+declare -A O_dest_dir=([photo]=~/Pictures [video]=~/Videos)
+
+# Configurable Constants
+summary_fifo_in=/tmp/summary_fifo_in
+summary_fifo_out=/tmp/summary_fifo_out
+
+# Minimum permissible file size (bytes): files below these sizes indicate error
+# TODO: Should we go ahead and copy such files with warning?
+declare -i C_MIN_FILE_SIZE=100
+
+# Define patterns used to determine media category from file extension
+# Important Note: Each value should be able to be placed within the @(...)
+# extglob construct.
+declare -A media_types=([photo]='jpg|jpeg|bmp|png|img' [video]='3gp|mov|avi|mts|mp4|thm')
+
+# Declare some globals that will be built within a function and used in the
+# find command that feeds the pipeline
+declare find_dirs find_iname_preds
+
+# Declare var used to record which EXIF utility we should use
+# Note: Will be set first time into get_exif_date().
+declare exif_util=unknown
+
+# Configure shell options
+# pattern matching options
+shopt -s extglob nocasematch
+
+# Functions
+usage() {
+cat <<eof >&2
+Usage: import_media [OPTION]... PATH [PATH]...
+eof
+}
+show_help() {
+cat <<eof >&2
+Options:
+  -h       show this help
+  -d       dry run, inhibits all actions
+  -e DATE  earliest-date, if specified, EXIF dates older than this will be
+           ignored
+  -i FLAGS suppress-info, default=<nothing suppressed>
+           set of flags specifying the types of information that
+           should NOT be logged. The following flags are supported:
+             a - suppress all info (when this is set, all other flags ignored)
+             s - file too small
+             d - duplicate files (multiples) discarded
+             D - problem creating or writing to directory
+             f - problem copying file
+             u - uniquified files
+             e - no exif utility for obtaining effective date
+  -l LVL   log level, default=3, one of the following:
+             0 - log nothing
+             1 - log progress through major pipeline stages
+             2 - log minor anomalies (e.g., already imported file)
+             3 - log commands (e.g., directory creation, file copy)
+  -m DIR   movie directory, default=~/Videos
+           directory under which movie files will be copied
+  -p DIR   picture directory, default=~/Pictures
+           directory under which picture files will be copied
+  -r       remove source files after successful copy
+eof
+}
+
+# Write exif date embedded in input file's metadata to stdout
+# Return: 1 if unable to get date (e.g., because there's no EXIF program
+# installed)
+# Note: First time in (exif_util==unknown), check to see which EXIF utility is
+# available, and set exif_util accordingly. If none is installed, set exif_util=none.)
+get_exif_date() {
+	if [ $exif_util = unknown ]; then
+		if which exif >&/dev/null; then
+			exif_util=exif
+		elif which exiv2 >&/dev/null; then
+			exif_util=exiv2
+		else
+			exif_util=none
+			# Warn user to install an exif reader
+			# TODO: Decide whether to make this a fatal error, and whether to perform the check up front...
+			# TODO: Does it make sense to have this as a suppressable option (given that you'd never get more than one warning per run)?
+			warn exif "No utility found for reading EXIF metadata from media files"
+			return 1
+		fi
+	fi
+	# Can't be 'unknown' or 'none' at this point...
+	# IMPORTANT NOTE: Have verified that when a file contains no exif
+	# metadata, exiv2 outputs error code of 253, but nothing is written
+	# to stdout. Hmm... Don't really want to be in the business of
+	# examining specific error codes in one of the exif utilities, but
+	# neither do I want this to be considered an error. Could look for
+	# presence or absence of non-verbose error, or could simply ignore.
+	# Update_16Oct2011: Also noticed that exiv2 sometimes outputs error
+	# code 253 (due to low-level library carping) when it *is* able to
+	# extract the required date information! Developer acknowledges the
+	# issue.
+	# Approach: Ignore the exiv2 error code; attempt to extract
+	# DateTimeOriginal, and if we can get it, use it; otherwise, write
+	# error output (if any) to stdout for caller and return 1.
+	# Note: Caller will silently ignore error code if stdout is empty, but
+	# will display the error (unless suppressed) otherwise.
+	# Note: I have avoided putting both the call to the EXIF utility and
+	# the subsequent processing into the same pipeline: the reason is that
+	# doing so complicates getting both the error code and the error
+	# message in case of problems. (Setting pipefail would ensure that the
+	# error code isn't clobbered by subsequent stages of the pipeline, but
+	# doesn't permit us to save the error message.)
+	local datestr output status
+	case $exif_util in
+	exif)
+		# Obtain date or error string
+		output=$(exif 2>&1 -t0x9003 "$1")
+		if (( $? )); then
+			echo $output
+			return 1
+		fi
+		# Process valid date string
+		datestr=$(echo "$output" | sed -n 's/^[[:space:]]*Value:[[:space:]]//p')
+		;;
+	exiv2)
+		# Obtain date or error string
+		output=$(exiv2 2>&1 -Pnv "$1")
+		# Attempt to process as date string
+		datestr=$(echo "$output" | grep DateTimeOriginal | awk '{ print $2 }')
+		if [[ -z "$datestr" ]]; then
+			# Write what must have been error output to stdout for caller and signal error
+			echo $output
+			return 1
+		fi
+		;;
+	none)
+		return 1
+		;;
+	esac
+	# Do non-utility-specific processing
+	echo "$datestr" |
+	# Convert date separator from : to / to facilitate directory creation
+	sed -n 's/\([0-9][0-9][0-9][0-9]\):\([0-9][0-9]\):\([0-9][0-9]\)/\1\/\2\/\3/p'
+}
+
+# Create directory whose path is input, taking into account the following
+# options:
+#   --dry-run
+#   --log-lvl
+# Note: Ensure that args are escaped suitably when displaying for log
+make_dir() {
+	local dir=$1; shift
+	# Log if appropriate
+	log $LOGLVL_COMMANDS "mkdir -p '$dir'"
+	# Perform action unless dry run
+	if [[ $O_dry_run != t ]]; then
+		# Create directory
+		mkdir -p "$dir"
+	fi
+}
+# Copy src to dst, taking into account the following options:
+#   --dry-run
+#   --log-lvl
+# Note: Ensure that args are escaped suitably when displaying for log
+copy_file() {
+	local src=$1; shift
+	local dst=$1; shift
+	# Log if appropriate
+	log $LOGLVL_COMMANDS "cp --preserve=timestamps '$src' '$dst'"
+	# Perform action unless dry run
+	if [[ $O_dry_run != t ]]; then
+		# Copy the file
+		# TODO: Eventually, really do the copy
+		cp --preserve=timestamps "$src" "$dst"
+	fi
+	# TODO: After initial use, implement the delete option
+}
+
+# Log information to stderr if and only if the input log level warrants it.
+log() {
+	local -i lvl=$1; shift
+	local str=$1; shift
+	# Log to stderr if log level is appropriate
+	if ((lvl <= O_log_lvl)); then
+		echo "$str" >/dev/stderr
+	fi
+}
+
+# Deliver the warning to stderr if and only if the input flag does not
+# correspond to suppressed information.
+warn() {
+# TODO - Add a quiet option...
+	local flag=$1; shift
+	local str=$1; shift
+	if [[ ! ${O_suppress_info[$flag]+t} ]]; then
+		echo "Warning: $str" >/dev/stderr
+	fi
+}
+
+# Output the specified error string to stderr, display usage information and
+# exit with error.
+# Function options:
+#   h - show help
+fatal_error() {
+	# Save and discard any flag options
+	if [[ $1 == -* ]]; then
+		local flags=${1#-}
+		shift
+	fi
+	local caller=${FUNCNAME[1]}
+	echo "$0: $caller: $*" >&2
+	# Refresh user's mind so it doesn't happen again...
+	usage
+	if [[ $flags == *h* ]]; then
+		show_help
+	fi
+	# TODO: Decide whether we need to differentiate between fatal errors,
+	# and if so, define symbolically.
+	exit 1
+}
+
+# Append input summary information for output at end
+# Note: Caller may pass in a single arg, or multiple args to be concatenated.
+append_summary() {
+	echo >& $fd_in "$*"
+}
+
+# Show all options (debug only)
+debug_show_options() {
+	echo "*** OPTION CHECK ***"
+	echo "find_dirs: $find_dirs"
+	echo "find_iname_preds: $find_iname_preds"
+	echo "dry-run: \`$O_dry_run'"
+	echo "suppress-info: \`${!O_suppress_info[*]}'"
+	echo "remove-after-copy: \`$O_remove_after_copy'"
+	echo "*** END OPTION CHECK ***"
+} >/dev/stderr
+
+# Process both command line options and args
+process_cmdline() {
+	# Loop over positional params
+	while getopts :hde:i:l:m:p:r name
+	do
+		case $name in
+		h)
+			usage
+			show_help
+			exit 0
+			;;
+		d)
+			O_dry_run=t
+			;;
+		e)
+			# Convert argument to the date format used in comparisons (YYYY/MM/DD)
+			O_earliest_date=$(date --date="$OPTARG" +%Y/%m/%d)
+			if (( $? )); then
+				fatal_error "Invalid date string supplied for earliest-date: \`$OPTARG'"
+			fi
+			;;
+		i)
+			# Define character class matching valid flags: e.g.,
+			# Flags  x y z ==> "[xyz]"
+			local vflags="[$(echo "${!C_suppress_info_names[*]}" | tr -d '[:space:]')]"
+			# Check for invalid flags by stripping all valid flags and checking what's left
+			local iflags=${OPTARG//@($vflags)/}
+			# Design Decision: Ignore embedded whitespace
+			iflags=${iflags//[[:space:]]/}
+			if [[ -n "$iflags" ]]; then
+				fatal_error "Invalid flag(s) supplied for suppress-info: \`$iflags'"
+			fi
+			# If here, all flags are valid
+			# If flag `a' is present, all others are redundant
+			if [[ $OPTARG == *a* ]]; then
+				# Suppress all info
+				for ityp in "${C_suppress_info_names[@]}"; do
+					${O_suppress_info[$ityp]}=
+				done
+			else
+				# Process valid flags individually
+				for flag in $(echo "$OPTARG" | sed 's/\B/ /'); do
+					O_suppress_info[${C_suppress_info_names[$flag]}]=
+				done
+			fi
+			;;
+		l)
+			# Make sure log-lvl is a number within valid range
+			if [[ $OPTARG == [1-9]*([0-9]) ]] &&
+			   (( $OPTARG <= $C_MAX_LOGLVL )); then
+				O_log_lvl=$OPTARG
+			else
+				fatal_error "Invalid value supplied for log-lvl: \`$OPTARG'"
+			fi
+			;;
+		r)
+			O_remove_after_copy=t
+			;;
+		m|p)
+			# Make sure specified directory exists, and user has
+			# permission to create things there...
+			if ! [[ -d "$OPTARG" ]]; then
+				fatal_error "Directory specified with option \`$name' must exist"
+			elif ! [[ -w "$OPTARG" || -x "$OPTARG" ]]; then
+				fatal_error "Directory specified with option \`$name' must be readable and writable"
+			fi
+			# The specified directory is valid - overwrite default with it
+			O_dest_dir[${C_dest_dir_names[$name]}]="$OPTARG"
+			;;
+		\?)
+			fatal_error "Invalid option supplied: \`$OPTARG'"
+			;;
+		:)
+			fatal_error "Required argument omitted for option \`$OPTARG'"
+			;;
+		*)
+			;;
+		esac
+	done
+	# Discard the processed options, leaving only the list of directories
+	shift $(($OPTIND-1))
+
+	# Build global vars find_dirs and find_iname_preds for use in
+	# generating file list for pipeline
+	find_dirs=
+	for d in "$@"; do
+		if [ -z "$find_dirs" ]; then
+			find_dirs+="'"
+		else
+			find_dirs+="' '"
+		fi
+		find_dirs+=$d
+	done
+	if [ -n "$find_dirs" ]; then
+		find_dirs+="'"
+	else
+		fatal_error -h "$0: Error: Must specify directories to import"
+	fi
+
+	find_iname_preds=
+	for mt in "${!media_types[@]}"; do
+		# Split `|' separated string into array of extensions
+		exts=(${media_types[$mt]//|/ })
+		for ext in "${exts[@]}"; do
+			if [ -z "$find_iname_preds" ]; then
+				find_iname_preds+='\('
+			else
+				find_iname_preds+=' -o'
+			fi
+			find_iname_preds+=" -iname '*.$ext'"
+		done
+	done
+	if [ -n "$find_iname_preds" ]; then
+		find_iname_preds+=' \)'
+	else
+		fatal_error "$0: Internal error: No media types specified"
+	fi
+}
+
+# Process command line options and args
+process_cmdline "$@"
+
+# DEBUG ONLY
+debug_show_options
+
+# Create fifo's for deferred write of summary information
+rm -f $summary_fifo_{in,out}
+mkfifo $summary_fifo_{in,out}
+
+# Spawn a subshell to read, buffer, and eventually output summary information
+# produced by the script.
+{
+	exec {fd_in}<$summary_fifo_in
+	exec {fd_out}>$summary_fifo_out
+	while IFS='' read line; do
+		summary+=("$line")
+	done <&$fd_in
+	# Main script has closed our input fifo; echo all accumulated lines to
+	# the output fifo.
+	for ((i=0; i<${#summary[@]}; i++))
+	do
+		echo "${summary[i]}" >&$fd_out
+	done
+} &
+
+# Open half-duplex pipes for reading/writing subshell process (started above)
+# used to buffer summary data for output at end.
+# Important Note: Attempts to open one end of the fifo will block until there's
+# someone on the other end...
+# Note: These file descriptors can be used within awk scripts and such.
+exec {fd_in}>$summary_fifo_in
+exec {fd_out}<$summary_fifo_out
+
+log 1 "About to generate file list..."
+# Generate raw list of files in the following format:
+# SIZE(b) | MTIME(s) | CTIME(s) | BASENAME | PATHNAME
+{
+eval "find $find_dirs -type f $find_iname_preds -printf '%s|%TY/%Tm/%Td|%CY/%Cm/%Cd|%f|%p\n'"
+log 1 "Finished generating source file list..."
+} | {
+# Read in `|' separated list, culling files smaller than the minimum, and
+# outputting in the following format:
+# SIZE(b) | MTIME(s) | CTIME(s) | BASENAME | PATHNAME
+# TODO: Decide whether the min size needs to be media type-specific, and if so,
+# move this stage to somewhere after we've determined media type.
+declare -i file_cnt=0 # unset at end of stage
+while IFS='|' read SIZE MTIME CTIME BASENAME PATHNAME; do
+	if (( $SIZE < $C_MIN_FILE_SIZE )); then
+		file_cnt+=1
+		warn small "Skipping file \`$PATHNAME' due to small size ($SIZE bytes)"
+	else
+		echo "$SIZE|$MTIME|$CTIME|$BASENAME|$PATHNAME"
+	fi
+done
+append_summary "# of source files ignored due to small size : $file_cnt"
+unset file_cnt
+} | {
+# Read in `|' separated list, inserting the md5 and sha1 checksums, and
+# outputting in the following format:
+# SIZE(b) | MTIME(Ymd) | CTIME(Ymd) | MD5SUM | SHA1SUM | BASENAME | PATHNAME
+
+declare -i file_cnt=0 # unset at end of stage
+while IFS='|' read SIZE MTIME CTIME BASENAME PATHNAME; do
+	file_cnt+=1
+	echo -ne "$SIZE|$MTIME|$CTIME|"
+	echo -ne "$(md5sum "$PATHNAME" | awk '{print $1}')|"
+	echo -ne "$(sha1sum "$PATHNAME" | awk '{print $1}')|"
+	echo -ne "$BASENAME|$PATHNAME"
+	echo
+done
+append_summary "# of source files: $file_cnt"
+unset file_cnt
+} | {
+# Sort on composite key to group duplicates for discard. Sort key comprises the
+# following...
+# SIZE     (integer)
+# MD5SUM   (32-digit hex string)
+# SHA1SUM  (32-digit hex string)
+# BASENAME (filename)
+# ...but uniqueness key excludes BASENAME, as identical files could have
+# different BASENAMEs.
+# Note: We warn on stderr about duplicate files with different BASENAMEs.
+sort -t'|' -k1n -k4,4 -k5,5 -k6,6
+log 1 "Finished generating file checksums..."
+} | {
+####awk -F'|' -v summary_fd=$fd_in '
+####{
+####	curr_key = $1 "|" $4 "|" $5
+####	basename = $6
+####	pathname = $7
+####	if (curr_key != prev_key) {
+####		print
+####		prev_key = curr_key
+####		delete basenames
+####		basenames[basename] = 1
+####	} else {
+####		if (!(basename in basenames)) {
+####			basenames[basename] = 1
+####			fflush()
+####			printf "Warning: Discarding file that appears to be duplicate," \
+####			       " despite differing basename: %s\n",
+####				pathname >"/dev/stderr"
+####		}
+####		dup_cnt++
+####	}
+####}
+####END {
+####	if (dup_cnt) {
+####		fflush()
+####		printf "# of duplicate source files discarded: %d\n", dup_cnt >"/dev/fd/" summary_fd
+####	}
+####}'
+####log 1 "Finished culling duplicates from source file list..."
+# Cull duplicates, displaying informational message if 'd' flag not in suppress-info
+# Stage input/output: SIZE(b) | MTIME(Ymd) | CTIME(Ymd) | MD5SUM | SHA1SUM | BASENAME | PATHNAME
+declare curr_key prev_key fn
+declare -i dup_cnt=0
+declare -A basenames
+declare -a pathnames
+while IFS='|' read SIZE MTIME CTIME MD5SUM SHA1SUM BASENAME PATHNAME; do
+	curr_key="$SIZE|$MD5SUM|$SHA1SUM"
+	if [[ $curr_key != $prev_key ]]; then
+		# Output warning on any old duplicates
+		if (( ${#pathnames[@]} > 1 )); then
+			warn dup "Discarding $((${#pathnames[@]} - 1)) duplicate files:"
+			warn dup $'\tKeeping: '"${pathnames[0]}"
+			warn dup $'\tDiscarding:'
+			# Remove original pathname before looping
+			unset pathnames[0]
+			# TODO: Should we flag differing basenames somehow?
+			for fn in "${pathnames[@]}"; do
+				warn dup $'\t\t'"$fn"
+			done
+		fi
+		# Process new file
+		echo "$SIZE|$MTIME|$CTIME|$MD5SUM|$SHA1SUM|$BASENAME|$PATHNAME"
+		prev_key=$curr_key
+		# Original (non-duplicate) file stored as element 0
+		pathnames=("$PATHNAME")
+	else
+		# Duplicate file
+		pathnames+=("$PATHNAME")
+		let dup_cnt++
+	fi
+done
+append_summary "# of duplicate source files discarded: ${dup_cnt}"
+if (( dup_cnt )); then
+	log 1 "Finished culling duplicates from source file list..."
+else
+	log 1 "No duplicates found in source file list..."
+fi
+unset curr_key prev_key dup_cnt basenames[@] pathnames fn
+} | {
+# Determine effective date and replace the 2 existing date fields with it.
+# Also, determine media category (e.g., photo or video) and record it in stream
+# for use by subsequent stages.
+# Note: Effective date is determined as follows:
+# If 'Date and Time (original)' (tag 0x9003) can be extracted from EXIF
+# metadata, use it; otherwise, use earliest of modification and status times.
+# Note: A time of 0.0 seconds translates to a date of 1969/12/31, which is not
+# plausible for digital images or videos. Thus, this represents an exception to
+# the rule of preferring earlier dates.
+declare -iA file_cnt=([photo]=0 [video]=0)
+declare -iA file_time_cnt=([exif]=0 [mtime]=0 [ctime]=0)
+while IFS='|' read SIZE MTIME CTIME MD5SUM SHA1SUM BASENAME PATHNAME; do
+	# TODO: Optimize so that we don't even call get_exif_date if exif_util==none
+	unset effective_date
+	if [[ ${BASENAME##*.} =~ jpe?g ]]; then
+		effective_date=$(
+			get_exif_date "$PATHNAME"
+		)
+		if (( $? )); then
+			# Couldn't get valid EXIF data, but is it a real error,
+			# or a simple lack of EXIF metadata?
+			if [[ -n "$effective_date" ]]; then
+				# Exif returned actual error string; probably
+				# signifies something worse than simple lack of
+				# EXIF metadata
+				warn exif "Error obtaining file's date from EXIF metadata for \`$PATHNAME': $effective_date"
+			fi
+			# Unset effective_date, since we know it doesn't contain date information
+			unset effective_date
+		elif [[ $effective_date < $O_earliest_date ]]; then
+			# Discard implausible date
+			unset effective_date
+		fi
+	fi
+	if [[ -z "$effective_date" ]]; then
+		if [[ $MTIME < $CTIME && $MTIME > "1969/12/31" ]]; then
+			effective_date=$MTIME
+			file_time_cnt[mtime]+=1
+		else
+			effective_date=$CTIME
+			file_time_cnt[ctime]+=1
+		fi
+	else
+		file_time_cnt[exif]+=1
+	fi
+	# Don't create directories for days of the month; make the month the
+	# final leaf.
+	# Rationale: Uploaders on sites such as Snapfish let you select all
+	# files in a directory, but won't walk a directory tree; thus, I want
+	# to minimize the number of leaves in the directory tree as much as
+	# feasible.
+	effective_date=${effective_date%/*}
+	# Convert file extension to designator such as "video" or "photo"
+	mt_found=
+	for mt in "${!media_types[@]}"; do
+		if [[ ${BASENAME##*.} == @(${media_types[$mt]}) ]]; then
+			mt_found=$mt
+			# Update media type count for summary purposes
+			file_cnt[$mt]+=1
+			break
+		fi
+	done
+	# Note: Shouldn't get any files of "unknown" type - would be internal
+	# error if we did...
+	# TODO: Consider how to handle here...
+	[ -z "$mt_found" ] && mt_found=unknown
+	
+	# Output line with MTIME and CTIME replaced by effective date
+	echo "$mt_found|$SIZE|$effective_date|$MD5SUM|$SHA1SUM|$BASENAME|$PATHNAME"
+done
+# TODO: Decide whether to parameterize completely (e.g., in case there are ever media types other than video and photo...)
+append_summary "# of non-duplicate source media files by type:"
+append_summary $'\t'"photo: ${file_cnt[photo]}"
+append_summary $'\t'"video: ${file_cnt[video]}"
+append_summary "# of non-duplicate source media files by timestamp method:"
+append_summary $'\t'"exif:  ${file_time_cnt[exif]}"
+append_summary $'\t'"mtime: ${file_time_cnt[mtime]}"
+append_summary $'\t'"ctime: ${file_time_cnt[ctime]}"
+# TODO: Perhaps change { } to ( ) to obviate need for unset's
+unset file_cnt file_time_cnt
+
+log 1 "Finished determining source file ages..."
+} | {
+# Current stream format:
+# MEDIA_TYPE | SIZE(b) | DATE(YYYY/mm/dd) | MD5SUM | SHA1SUM | BASENAME | PATHNAME
+# Reorder the rows, grouping files by media type and effective date (i.e.,
+# destination dir), and sorting the basenames within each date.
+sort -t'|' -k1,1 -k3,3 -k6,6
+log 1 "Finished sorting files into final copy order..."
+} | {
+declare -i dir_created_cnt=0 dir_error_cnt=0 collision_cnt=0 \
+	file_copy_cnt=0 already_imported_cnt=0 file_error_cnt=0 \
+	total_bytes_copied=0
+# For each destination dir, determine which source files are duplicates, and
+# which require rename to prevent collision on copy.
+while IFS='|' read MEDIA_TYPE SIZE DATE MD5SUM SHA1SUM BASENAME PATHNAME; do
+	dest_dir=${O_dest_dir[$MEDIA_TYPE]}/$DATE
+	if [ "$dest_dir" != "$dest_dir_prev" ]; then
+		unset creating_dir skipping_dir
+		dest_dir_prev=$dest_dir
+		# Do we need to create the dest_dir?
+		if [ -d "$dest_dir" ]; then
+			if ! [ -w "$dest_dir" -a -x "$dest_dir" ]; then
+				# Dir exists but can't read or write - warn and
+				# skip
+				warn dir "Can't copy files to \`$dest_dir' due to directory permissions"
+				skipping_dir=1
+				dir_error_cnt+=1
+			fi
+		elif [ -a "$dest_dir" ]; then
+			# Pathname exists but it's not directory - warn and
+			# skip
+			warn dir "Can't copy files to \`$dest_dir', which is a non-directory file of some sort"
+			skipping_dir=1
+			dir_error_cnt+=1
+		else
+			# Pathname doesn't exist - will need to create
+			creating_dir=1
+		fi
+		# Declare hash allowing us to avoid name collisions in
+		# destination dir
+		unset basenames_added
+		declare -A basenames_added
+		# The following duplicate detection logic can be skipped if the
+		# directory is empty.
+		if ! [ $creating_dir ]; then
+			unset src_dir_cksums
+			declare -A src_dir_cksums
+			# For dest_dir, generate associative array keyed with
+			# concatentation of md5/sha1 checksums for each file.
+			# Rationale: Facilitates duplicate checking
+			# TODO: Do we need to constrain list of files returned by find?
+			eval "find $dest_dir -type f $find_iname_preds -printf '%f|%p\n'" \
+			|
+			# Insert md5 and sha1 checksums, outputting in the following
+			# format:
+			# MD5SUM | SHA1SUM
+			while IFS='|' read basename pathname; do
+				# Set pipefail here so we'll know to ignore
+				# what's in key in case of failure.
+				# TODO: Consider moving up higher for sake of efficiency (or possibly setting once at top of script, if feasible)
+				set -o pipefail
+				key="$(md5sum "$pathname" | awk '{print $1}')"
+				if (( $? )); then
+					warn md5 "Skipping file due to error generating md5 sum: \`$pathname'"
+				fi
+				key+="|$(sha1sum "$pathname" | awk '{print $1}')"
+				if (( $? )); then
+					warn sha1 "Skipping file due to error generating sha1 sum: \`$pathname'"
+				fi
+				# Hash the checksum (hash) values so we'll skip
+				# this file if it's found in source
+				src_dir_cksums[$key]=$basename
+			done
+		fi
+		# Create the destination directory if it doesn't exist
+		if [ $creating_dir ]; then
+			if ! make_dir "$dest_dir"; then
+				warn dir "Failed to create \`$dest_dir' due to unknown error"
+				skipping_dir=1
+				dir_error_cnt+=1
+			else
+				let dir_created_cnt++
+			fi
+		fi
+	fi
+	# Short-circuit on error that prevents copy to dest_dir
+	[ $skipping_dir ] && continue
+	# Use assoc array src_dir_cksums to detect duplicate.
+	if ! [ $creating_dir ]; then
+		if [ ${src_dir_cksums["$MD5SUM|$SHA1SUM"]+1} ]; then
+			# This one's been imported already - skip
+			already_imported_cnt+=1
+			continue
+		fi
+	fi
+	# If basename already exists in dest_dir, or we have a source file by
+	# that name to copy to dest dir, uniquify and save uniquified name for
+	# subsequent checks.
+	if [ -a "$dest_dir/$BASENAME" -o -n "${basenames_added[$BASENAME]+1}" ]; then
+		# Uniquify name
+		basename_dest=
+		for ((i=1; ; ++i)); do
+			basename_dest="${BASENAME%.*}_$i.${BASENAME##*.}"
+			if [[ ! -a "$dest_dir/$basename_dest" &&
+			      -z "${basenames_added[$basename_dest]+1}" ]]; then
+				# Found unique name
+				warn uniq "Uniquifying $BASENAME ==> $basename_dest (in folder $dest_dir)"
+				break
+			fi
+		done
+		collision_cnt+=1
+	else
+		basename_dest=$BASENAME
+	fi
+	# We have unique basename. Hash it to be sure we don't use it in the
+	# dest_dir again.
+	basenames_added[$basename_dest]=
+	if copy_file "$PATHNAME" "$dest_dir/$basename_dest"; then
+		let file_copy_cnt++
+		let total_bytes_copied+=$SIZE
+	else
+		warn file "Failed to copy \`$PATHNAME' due to unknown error"
+		file_error_cnt+=1
+	fi
+done
+
+append_summary "Summary of counts pertaining to final copy to destination directories:"
+append_summary $'\t'"# of directories created:                          $dir_created_cnt"
+append_summary $'\t'"# of problematic destination directories:          $dir_error_cnt"
+append_summary $'\t'"# of file collisions avoided by name modification: $collision_cnt"
+append_summary $'\t'"# of previously-imported files that were skipped:  $already_imported_cnt"
+append_summary $'\t'"# of files copied to destination directories:      $file_copy_cnt"
+append_summary $'\t'"# of file copy errors:                             $file_error_cnt"
+append_summary $'\t'"# of bytes copied:                                 $total_bytes_copied"
+unset dir_created_cnt dir_error_cnt collision_cnt already_imported_cnt file_copy_cnt file_error_cnt total_bytes_copied
+log 1 "Finished copying files..."
+}
+
+
+# Close the fifo to permit summary subshell's read loop to terminate
+exec {fd_in}<&-
+
+# Now read and write the summary
+echo "==================="
+echo Writing summary...
+# Note: Inhibit word-splitting to avoid losing any formatting indents
+while IFS='' read line; do
+	echo "$line"
+done <&$fd_out
+
+echo "Finished summary..."
+
+
+
+
+

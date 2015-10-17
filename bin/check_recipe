@@ -1,0 +1,28 @@
+#! /bin/bash
+
+IFS=,
+declare -a r1=($1) r2=($2)
+unset IFS
+dups=
+declare -A map=()
+for i in 1 2; do
+	k="r$i[@]"
+	for el in "${!k}"; do
+		idx=${el%%:*} tags=${el#*:}
+		if ((i == 1)); then
+			map[$idx]=1
+		else
+			# Check for dup.
+			if [[ ${map[$idx]} ]]; then
+				dups+=" $idx"
+			fi
+		fi
+	done
+done
+
+if [[ -n $dups ]]; then
+	echo >&2 "Duplicate hw binding indices detected: $dups"
+	exit 1
+fi
+
+# vim: ts=4:sw=4:noet:tw=80
