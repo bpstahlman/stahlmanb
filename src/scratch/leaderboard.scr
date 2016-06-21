@@ -1,0 +1,251 @@
+Use 2 clones to start processing the 2 leaderboards in parallel. Use length 2
+arrays for biodirectional control/feedback. Only 1 clone will complete.
+
+Events:
+	UpdateLeaderboard
+Globals:
+	g:Leaderboard_Name
+	g:Leaderboard_Score
+Cloud:
+	c:Leaderboard1
+	c:Leaderboard2
+Local Const:
+	MAX_SCORES = 100
+    // Note: This one set after initialization of char array.
+	MAX_C
+	
+Local:
+	lbs[]
+	names[]
+	scores[]
+	ary[]
+	sts[]
+	css[]
+	sns[]
+	cli
+	idx
+	wr_idx
+	done
+	i
+	ii
+	n
+	nn
+    max
+	c
+	s
+	cs
+	enc
+Function Local:
+	enc_i
+	enc_cs
+	enc_enc
+
+On start:
+	sts = [cs,cs]
+	lbs = [Leaderboard1, Leaderboard2]
+	names = []
+	scores = []
+	cli = 1
+	repeat 2
+		clone
+		cli++
+		
+    // Wait for both clones to pause, and in the process, determine highest
+    // seqno (will correspond to most recent leaderboard if validation
+    // ultimately checks out).
+	done = 0
+	repeat until done = 1
+		i = 1
+		done = 1
+		repeat 2
+			if sts[i] = pre_lb || sts[i] = abort
+				if !sts[i] = abort
+					if idx = 0 || sns[i] > sns[idx]
+						idx = i
+			else
+				done = 0
+			i++
+
+	// Important TODO: Consider subsuming this into the repeat until done = 1 loop above.
+	// Rationale: With a little tweaking, could make this more generic: e.g.,
+	// support more than 2 lbs, and keep trying next best seqno till we find
+	// one that's valid or have tried all. (Would need to add check for exhausting all.)
+	if idx > 0
+		// At least one valid so far; let the one presumed to be most recent
+		// finish.
+		// Rationale: If it ends up being valid, there's no need to check others.
+		sts[idx] = lb
+		wait until !sts[idx] = lb
+
+		if sts[idx] = abort
+			// Try the other if it it hasn't yet aborted.
+			idx = (idx mod 2) + 1
+			if !sts[idx] = abort
+				sts[idx] = lb
+				wait until !sts[idx] = lb
+				if sts[idx] = abort
+					idx = 0
+
+	if idx > 0
+        sn = sns[idx] + 1
+		wr_idx = (idx mod 2) + 1
+	else
+        // Initialize to something nonzero to bolster checksum.
+        sn = 1234
+		wr_idx = 1
+	
+// Note: If no valid pre-existing list, names and scores will be empty;
+// otherwise, they'll have existing stuff. Either way, augment with this
+// user's name/score...
+ins
+
+// Encode everything.
+encall(sn)
+
+if wr_idx = 1
+	c:Leaderboard1 = enc
+else
+	c:Leaderboard2 = enc
+
+
+When I start as a clone
+	i = 1
+	n = length of lbs[cli]
+	st[cli] = cs
+	max_c = length of chs
+	nn = 0
+    max = 50
+	s = ''
+	// Make sure even number of digits.
+	if (n + 1) mod 2 = 0
+		sts[cli] = abort
+	// Encoded string must have at least 2-digits each of cs, sep, sn
+	if n < 6
+		sts[cli] = abort
+	repeat until i > n || sts[cli] = abort
+		c = join lbs[i], lbs[i + 1]
+		i += 2
+		if c > 0
+			// Field length check...
+            if nn > max
+				sts[cli] = abort
+
+			// Validate char idx
+			if !sts[cli] = abort
+				if c > max_c
+					sts[cli] = abort
+
+			if !sts[cli] = abort
+				// Decode a single character and update char count.
+				s = join(s, letter c of chs)
+				nn++
+				// Check fields that permit only digits...
+				if sts[cli] = cs || sts[cli] = sn || (sts[cli] = lb && ii = 1)
+					if !(round(c) = c)
+						// Not digit!
+						sts[cli] = abort
+		if c = 0 || i > n
+			// Terminator found or falling off end...
+			// Assumption: A NULL never precedes empty field: thus, s should never be empty here.
+			// Rationale: We pre-add the 00 for name/score, not unconditionally after sn field.
+			if nn = 0
+				sts[cli] = abort
+			if sts[cli] = cs
+				// TODO: Is round necessary?
+				css[cli] = s
+				sts[cli] = sn
+                max = 50
+			else
+				if sts[cli] = sn
+					sns[cli] = s
+					sts[cli] = pre_lb
+					wait until !(sts[cli] = pre_lb)
+					if sts[cli] = lb
+						ii = 0
+                        max = 500
+				else
+					if sts[cli] = lb
+						if ii = 0
+							names[] = s
+							ii = 1
+                            max = 50
+						else
+							scores[] = round(s)
+							ii = 0
+                            max = 500
+			s = ''
+			nn = 0
+
+
+	// Note: If applicable, scores/names arrays have been built.
+	if sts[cli] = lb && ii = 0
+		sts[cli] = success
+	else
+		// Only 1 (sub-)state in which it's ok to fall off end.
+		sts[cli] = abort
+		
+		
+Block: ins
+	i = 1
+	n = length of scores
+	// Add name/score to sorted list and remove lowest scores when over limit.
+	loop until i > n || done = 1
+		if !score < scores[i]
+			// Found spot!
+			insert score at i in scores
+			insert name at i in names
+			done = 1
+		i++
+	if !done = 1 && !n > MAX_SCORES
+		insert score at last in scores
+		insert name at last in names
+	// Delete lowest excess scores.
+	n = n - MAX_SCORES
+	repeat n
+		delete last of scores
+		delete last of names
+	
+// Outputs: enc_enc, enc_cs
+Block: enc(str)
+	enc_i = 1
+	enc_cs = 0
+	enc_enc = ''
+	repeat length of str
+		index_of(str[enc_i])
+		enc_c = index_of_res
+		// TODO: Perhaps check for 0, but shouldn't be able to happen.
+		enc_cs += enc_c
+		if length of enc_c = 1
+			enc_c = join 0, enc_c
+		enc_enc = join enc_enc, enc_c
+		enc_i++
+		
+
+// Outputs: enc
+// Context: Can use bare locals
+Block: encall(sn)
+	cs = 0
+	enc = ''
+	ary = [sn]
+	i = 1
+	n = length of names
+	repeat n
+		ary[] = names[i]
+		ary[] = scores[i]
+		i++
+	
+	i = 1
+	repeat 2 * n + 1
+		enc = join enc, '00'
+		enc(ary[i])
+		enc = join enc, enc_enc
+		cs += enc_cs
+		i++
+	
+	// Just need to prepend cs
+	enc(cs)
+	enc = join enc_enc, enc
+	
+
+
+// vim:ts=4:sw=4:et:ft=c
