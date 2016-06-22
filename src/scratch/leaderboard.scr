@@ -12,9 +12,11 @@ Cloud:
 Local Const:
 	MAX_SCORES = 100
     // Note: This one set after initialization of char array.
-	MAX_C
+	MAX_C = length of chs
 	
 Local:
+    ch_str // used for initialization of chs only
+    chs[]  // list of chars with offset corresponding to encoding
 	lbs[]
 	names[]
 	scores[]
@@ -24,6 +26,7 @@ Local:
 	sns[]
 	cli
 	idx
+    alt_idx
 	wr_idx
 	done
 	i
@@ -40,11 +43,21 @@ Function Local:
 	enc_cs
 	enc_enc
 
-On start:
-	sts = [cs,cs]
+On Start:
+    // TODO: Perhaps lazy init.
+    init_chs
+	MAX_C = length of chs
+    
+do_init:
+	sts = [,]
 	lbs = [Leaderboard1, Leaderboard2]
+    name = Leaderboard_Name
+    score = Leaderboard_Score
 	names = []
 	scores = []
+
+On UpdateLeaderboard:
+    do_init
 	cli = 1
 	repeat 2
 		clone
@@ -66,7 +79,7 @@ On start:
 				done = 0
 			i++
 
-	// Important TODO: Consider subsuming this into the repeat until done = 1 loop above.
+	// Possible TODO: Consider subsuming this into the repeat until done = 1 loop above.
 	// Rationale: With a little tweaking, could make this more generic: e.g.,
 	// support more than 2 lbs, and keep trying next best seqno till we find
 	// one that's valid or have tried all. (Would need to add check for exhausting all.)
@@ -76,15 +89,21 @@ On start:
 		// Rationale: If it ends up being valid, there's no need to check others.
 		sts[idx] = lb
 		wait until !sts[idx] = lb
-
+        alt_idx = (idx mod 2) + 1
+        // TODO: Refactor the idx/alt_idx/wr_idx vars.
 		if sts[idx] = abort
+            idx = alt_idx
 			// Try the other if it it hasn't yet aborted.
-			idx = (idx mod 2) + 1
 			if !sts[idx] = abort
 				sts[idx] = lb
 				wait until !sts[idx] = lb
 				if sts[idx] = abort
+                    // None valid
 					idx = 0
+        else
+            // No need to try the other. Let it die...
+            sts[alt_idx] = abort
+
 
 	if idx > 0
         sn = sns[idx] + 1
@@ -94,85 +113,87 @@ On start:
         sn = 1234
 		wr_idx = 1
 	
-// Note: If no valid pre-existing list, names and scores will be empty;
-// otherwise, they'll have existing stuff. Either way, augment with this
-// user's name/score...
-ins
+    // Insert current user's name/score
+    // Note: If no valid pre-existing list, names and scores will be empty;
+    // otherwise, they'll have existing stuff. Either way, augment with this
+    // user's name/score...
+    ins
 
-// Encode everything.
-encall(sn)
+    // Encode everything.
+    encall(sn)
 
-if wr_idx = 1
-	c:Leaderboard1 = enc
-else
-	c:Leaderboard2 = enc
+    if wr_idx = 1
+        c:Leaderboard1 = enc
+    else
+        c:Leaderboard2 = enc
 
 
 When I start as a clone
-	i = 1
-	n = length of lbs[cli]
 	st[cli] = cs
-	max_c = length of chs
-	nn = 0
-    max = 50
-	s = ''
+	i = 1         // char idx
+	nn = 0        // used for fld len
+    max = 50      // max fld len
+	n = length of lbs[cli]
+	s = ''        // fld accum
 	// Make sure even number of digits.
 	if (n + 1) mod 2 = 0
 		sts[cli] = abort
 	// Encoded string must have at least 2-digits each of cs, sep, sn
-	if n < 6
-		sts[cli] = abort
+    else
+        if n < 6
+            sts[cli] = abort
 	repeat until i > n || sts[cli] = abort
 		c = join lbs[i], lbs[i + 1]
 		i += 2
 		if c > 0
-			// Field length check...
+            // Validation
             if nn > max
+                // Field too long!
 				sts[cli] = abort
-
-			// Validate char idx
-			if !sts[cli] = abort
-				if c > max_c
+            else
+				if c > MAX_C
+                    // Bad char!
 					sts[cli] = abort
-
-			if !sts[cli] = abort
-				// Decode a single character and update char count.
-				s = join(s, letter c of chs)
-				nn++
-				// Check fields that permit only digits...
-				if sts[cli] = cs || sts[cli] = sn || (sts[cli] = lb && ii = 1)
-					if !(round(c) = c)
-						// Not digit!
-						sts[cli] = abort
+                else
+                    // Decode a single character and update char count.
+                    s = join(s, letter c of chs)
+                    nn++
+                    // Check fields that permit only digits...
+                    if sts[cli] = cs || sts[cli] = sn || (sts[cli] = lb && ii = 1)
+                        if !(round(c) = c)
+                            // Not digit!
+                            sts[cli] = abort
 		if c = 0 || i > n
 			// Terminator found or falling off end...
-			// Assumption: A NULL never precedes empty field: thus, s should never be empty here.
-			// Rationale: We pre-add the 00 for name/score, not unconditionally after sn field.
+			// Assumption: s should never be empty here.
+            // Rationale: We never add 00 before empty field: e.g., we pre-add
+            // the 00 for name/score, not unconditionally after sn field.
 			if nn = 0
 				sts[cli] = abort
-			if sts[cli] = cs
-				// TODO: Is round necessary?
-				css[cli] = s
-				sts[cli] = sn
-                max = 50
-			else
-				if sts[cli] = sn
-					sns[cli] = s
-					sts[cli] = pre_lb
-					wait until !(sts[cli] = pre_lb)
-					if sts[cli] = lb
-						ii = 0
-                        max = 500
-				else
-					if sts[cli] = lb
-						if ii = 0
-							names[] = s
-							ii = 1
-                            max = 50
-						else
-							scores[] = round(s)
-							ii = 0
+            else
+                if sts[cli] = cs
+                    // TODO: Is round necessary?
+                    css[cli] = s
+                    sts[cli] = sn
+                    max = 50
+                else
+                    if sts[cli] = sn
+                        sns[cli] = s
+                        sts[cli] = pre_lb
+                        wait until !(sts[cli] = pre_lb)
+                        if sts[cli] = lb
+                            ii = 0
                             max = 500
+                    else
+                        if sts[cli] = lb
+                            if ii = 0
+                                names[] = s
+                                ii = 1
+                                max = 50
+                            else
+                                scores[] = round(s)
+                                ii = 0
+                                max = 500
 			s = ''
 			nn = 0
 
@@ -215,6 +236,7 @@ Block: enc(str)
 		enc_c = index_of_res
 		// TODO: Perhaps check for 0, but shouldn't be able to happen.
 		enc_cs += enc_c
+        // Prepend leading '0' if necessary to ensure 2 digits.
 		if length of enc_c = 1
 			enc_c = join 0, enc_c
 		enc_enc = join enc_enc, enc_c
@@ -224,6 +246,7 @@ Block: enc(str)
 // Outputs: enc
 // Context: Can use bare locals
 Block: encall(sn)
+    // TODO: Consider adding a bias to cs.
 	cs = 0
 	enc = ''
 	ary = [sn]
@@ -234,15 +257,17 @@ Block: encall(sn)
 		ary[] = scores[i]
 		i++
 	
+    // Encode all fields but cs, keeping up with cksum val as we go.
 	i = 1
 	repeat 2 * n + 1
+        // Note: Ok to prepend '00' since cs is prepended after loop.
 		enc = join enc, '00'
 		enc(ary[i])
 		enc = join enc, enc_enc
 		cs += enc_cs
 		i++
 	
-	// Just need to prepend cs
+	// Now prepend cs
 	enc(cs)
 	enc = join enc_enc, enc
 	
