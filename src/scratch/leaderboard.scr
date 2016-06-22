@@ -34,10 +34,10 @@ Local:
 	n
 	nn
     max
-	c
-	s
-	cs
-	enc
+	c      // generic char var
+	s      // generic string var
+	cs     // generic cksum var
+	enc    // updated and encoded leaderboard
 Function Local:
 	enc_i
 	enc_cs
@@ -83,6 +83,8 @@ On UpdateLeaderboard:
 	// Rationale: With a little tweaking, could make this more generic: e.g.,
 	// support more than 2 lbs, and keep trying next best seqno till we find
 	// one that's valid or have tried all. (Would need to add check for exhausting all.)
+    // But... I'm thinking that going past 2 redundant lbs might be going past
+    // point of diminishing returns...
 	if idx > 0
 		// At least one valid so far; let the one presumed to be most recent
 		// finish.
@@ -104,7 +106,6 @@ On UpdateLeaderboard:
             // No need to try the other. Let it die...
             sts[alt_idx] = abort
 
-
 	if idx > 0
         sn = sns[idx] + 1
 		wr_idx = (idx mod 2) + 1
@@ -122,6 +123,7 @@ On UpdateLeaderboard:
     // Encode everything.
     encall(sn)
 
+    // Write back to appropriate cloud var.
     if wr_idx = 1
         c:Leaderboard1 = enc
     else
@@ -132,13 +134,14 @@ When I start as a clone
 	st[cli] = cs
 	i = 1         // char idx
 	nn = 0        // used for fld len
-    max = 50      // max fld len
+    max = 50      // state-specific max fld len
 	n = length of lbs[cli]
 	s = ''        // fld accum
 	// Make sure even number of digits.
 	if (n + 1) mod 2 = 0
 		sts[cli] = abort
 	// Encoded string must have at least 2-digits each of cs, sep, sn
+    // TODO: Could be more than 6 if we have a seqno bias.
     else
         if n < 6
             sts[cli] = abort
@@ -146,6 +149,8 @@ When I start as a clone
 		c = join lbs[i], lbs[i + 1]
 		i += 2
 		if c > 0
+            // Note: Increment nn here so it can be used in validation.
+            nn++
             // Validation
             if nn > max
                 // Field too long!
@@ -155,17 +160,17 @@ When I start as a clone
                     // Bad char!
 					sts[cli] = abort
                 else
-                    // Decode a single character and update char count.
+                    // Decode a single character.
                     s = join(s, letter c of chs)
-                    nn++
                     // Check fields that permit only digits...
                     if sts[cli] = cs || sts[cli] = sn || (sts[cli] = lb && ii = 1)
+                        // Assumption: round on a non-number returns 0.
                         if !(round(c) = c)
                             // Not digit!
                             sts[cli] = abort
 		if c = 0 || i > n
 			// Terminator found or falling off end...
-			// Assumption: s should never be empty here.
+			// Assumption: s should never be empty here if encoding is valid.
             // Rationale: We never add 00 before empty field: e.g., we pre-add
             // the 00 for name/score, not unconditionally after sn field.
 			if nn = 0
@@ -173,12 +178,12 @@ When I start as a clone
             else
                 if sts[cli] = cs
                     // TODO: Is round necessary?
-                    css[cli] = s
+                    css[cli] = round(s)
                     sts[cli] = sn
                     max = 50
                 else
                     if sts[cli] = sn
-                        sns[cli] = s
+                        sns[cli] = round(s)
                         sts[cli] = pre_lb
                         wait until !(sts[cli] = pre_lb)
                         if sts[cli] = lb
@@ -194,6 +199,7 @@ When I start as a clone
                                 scores[] = round(s)
                                 ii = 0
                                 max = 500
+            // Fld complete
 			s = ''
 			nn = 0
 
