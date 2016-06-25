@@ -1,6 +1,3 @@
-Use 2 clones to start processing the 2 leaderboards in parallel. Use length 2
-arrays for biodirectional control/feedback. Only 1 clone will complete.
-
 Events:
     UpdateLeaderboard
 Globals:
@@ -41,7 +38,7 @@ Function Local:
 Function Local:
     encall_enc
 Function Local:
-    dec_i
+    dec_ci
     dec_n
     dec_nf
     dec_fi
@@ -51,20 +48,21 @@ Function Local:
 
 On Start:
     // TODO: Perhaps lazy init.
-    INIT_CHS // in scratch only, but pretty simple
+    init_chs // in scratch only, but pretty simple
     MAX_C = length of chs
     flens = [50, 500, 50]
     isnum = [1, 0, 1]
     
 On UpdateLeaderboard:
     lbs = [c:Leaderboard1, c:Leaderboard2]
-        
-    try = []
-    cis = []
+    try = [] // potentially-valid lb indices
+    cis = [] // holds cidx value for next call to dec
+    // Partially process both lbs.
     i = 1
     repeat 2
         ii = i * 2 - 1
         dec(lbs[i], 1, 1, 1, 2, 2)
+        // Add unconditionally (regardless of validity) to assure proper length.
         add dec_cidx to cis
         if dec_ok
             // Validate cs and sn
@@ -79,7 +77,7 @@ On UpdateLeaderboard:
     n = length of try
     repeat until done || i > n
         j = try[i]
-        dec(lbs[j], cis[j], 1, 1, 2, 2)
+        dec(lbs[j], cis[j], 2, 3, 0, 0)
         if dec_ok
             ii = j * 2 - 1 // index of cs in ary
             if ary[ii] = ary[ii + 1] + dec_cs
@@ -91,6 +89,7 @@ On UpdateLeaderboard:
         i++
 
     if idx > 0
+        // At least 1 lb valid
         // Remove unused elements from ary[].
         wr_idx = (idx mod 2) + 1
         repeat 2
@@ -119,20 +118,20 @@ Block: trunc_ary(keep)
         delete last of ary
 
 // Inputs: lb, cidx, f1, f2, min_nf, max_nf
-// Outputs: dec_ok, dec_cidx, dec_fcnt, dec_cksum
-Block: dec(lb, cidx, f1, f2, min_nf, max_nf)
-    dec_i = cidx
+// Outputs: dec_ok, dec_ci, dec_fcnt, dec_cs
+Block: dec(lb, ci, f1, f2, min_nf, max_nf)
+    dec_ci = ci
     dec_n = length of lb
     dec_nf = 0           // # flds processed
     dec_fi = f1          // cur fld in ary (wraps at f2)
-    dec_flen = 0         // len len
+    dec_flen = 0         // fld len
     dec_s = ''           // fld accum
     dec_cs = 0
     dec_ok = true
 
-    repeat until dec_i > dec_n || not dec_ok
-        c = join lb[dec_i], lb[dec_i + 1]
-        dec_i += 2
+    repeat until dec_ci > dec_n || not dec_ok
+        c = join lb[dec_ci], lb[dec_ci + 1]
+        dec_ci += 2
 
         if c > 0
             // Note: Increment dec_flen here so it can be used in validation.
@@ -149,24 +148,30 @@ Block: dec(lb, cidx, f1, f2, min_nf, max_nf)
                 else
                     // Decode a single character.
                     dec_s = join(dec_s, letter c of chs)
-                    // Check fields that permit only digits...
-                    // Assumption: round on a non-number returns 0.
-                    if isnum[dec_fi] && !(round(c) = c)
-                        // Digit required!
+                    // TODO: Consider doing digit check here, in lieu of (or in
+                    // addition to) num check at field termination.
+        else
+            if c = 0
+                // Terminator found.
+                // Fld validation
+                if dec_flen = 0
+                    dec_ok = false
+                else
+                    if isnum[dec_fi] && !(round(dec_s) = dec_s)
+                        // Number required
                         dec_ok = false
-        if dec_ok && c = 0
-            // Terminator found.
-            if dec_flen = 0
-                dec_ok = false
+                if dec_ok
+                    add dec_s to ary
+                    // Fld complete
+                    // Note: None of this matters if not dec_ok
+                    dec_nf++
+                    dec_s = ''
+                    dec_flen = 0
+                    dec_fi++
+                    if dec_fi > f2
+                        dec_fi = f1
             else
-                add dec_s to ary
-            // Fld complete
-            dec_nf++
-            dec_s = ''
-            dec_flen = 0
-            dec_fi++
-            if dec_fi > f2
-                dec_fi = f1
+                dec_ok = false
 
     // Final validation
     if dec_ok
@@ -184,10 +189,6 @@ Block: dec(lb, cidx, f1, f2, min_nf, max_nf)
                         // Must process whole number of f1..f2 chunks.
                         // Note: Could have arg that governs this...
                         dec_ok = false
-
-    if dec_ok
-        dec_nf = dec_nf
-        dec_cidx = dec_i
             
 
 // Context: non-reentrant
