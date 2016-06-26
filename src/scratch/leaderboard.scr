@@ -8,6 +8,9 @@ Cloud:
     c:Leaderboard2
 Local Const:
     MAX_SCORES = 100
+    // Note: These 2 set by init_chs
+    CH_0 = <char index of '0'>
+    CH_9 = <char index of '9'>
     // Note: This one set after initialization of char array.
     MAX_C = length of chs
     CH_STR // used for initialization of chs only
@@ -17,6 +20,7 @@ Local:
     lbs[]
     try[]
     cis[]
+    css[]
     ary[]
     flens[]
     isnum[]
@@ -33,11 +37,15 @@ Local:
     cs     // generic cksum var
     enc    // updated and encoded leaderboard
 Function Local:
+    enc_c
+    enc_i
     enc_cs
     enc_enc
 Function Local:
     encall_enc
 Function Local:
+    dec_i
+    dec_c
     dec_ci
     dec_n
     dec_nf
@@ -57,21 +65,36 @@ On UpdateLeaderboard:
     lbs = [c:Leaderboard1, c:Leaderboard2]
     try = [] // potentially-valid lb indices
     cis = [] // holds cidx value for next call to dec
+    css = []
     // Partially process both lbs.
     i = 1
     repeat 2
         ii = i * 2 - 1
-        dec(lbs[i], 1, 1, 1, 2, 2)
+        // Pre-validation
+        // Encoded string must have at least 2-digits each of cs, sep, sn, and
+        // all digits must appear in pairs.
+        // TODO: Min could be more than 6 if we have a seqno bias.
+        n = length of lbs[i]
+        if n < 6 || (n + 1) mod 2 = 0
+            dec_ok = false
+        else
+            dec(lbs[i], 1, 1, 1, 2, 2)
         // Add unconditionally (regardless of validity) to assure proper length.
         add dec_cidx to cis
+        add dec_cs to css
         if dec_ok
             // Validate cs and sn
             // TODO: Perhaps more checking on (eg) seqno
             if ary[ii] > 0 && ary[ii+1] > 0
-                add i to try[]
+                // Insert at proper location in try[]
+                // Note: With only 2 elements, sorted add is simple.
+                if length of try = 0 || try[1] > ary[ii+1]
+                    add i to try[] // append
+                else
+                    insert i at 1 in try
         i++
 
-    idx = 0 // will be set to point to first valid lb
+    idx = 0 // will be set to point to first valid lb (if any)
     // Try all potentially-valid lbs
     i = 1
     n = length of try
@@ -80,7 +103,7 @@ On UpdateLeaderboard:
         dec(lbs[j], cis[j], 2, 3, 0, 0)
         if dec_ok
             ii = j * 2 - 1 // index of cs in ary
-            if ary[ii] = ary[ii + 1] + dec_cs
+            if ary[ii] = css[j] + dec_cs
                 done = true
                 idx = j
                 // Trim ary if necessary.
@@ -130,28 +153,39 @@ Block: dec(lb, ci, f1, f2, min_nf, max_nf)
     dec_ok = true
 
     repeat until dec_ci > dec_n || not dec_ok
-        c = join lb[dec_ci], lb[dec_ci + 1]
-        dec_ci += 2
+        if dec_n - dec_ci < 1
+            // TODO: Odd # of digits - just check this up front.
+            dec_ok = false
+        // Get and validate next pair of digits.
+        dec_c = ''
+        dec_i = 1
+        repeat until dec_i > 2 || not dec_ok
+            if lb[dec_ci] < CH_0 || lb[dec_ci] > CH_9
+                dec_ok = false
+            else
+                dec_c = join(dec_c, lb[dec_ci])
+            dec_i++
+            dec_ci++
 
-        if c > 0
+        if dec_c > 0
             // Note: Increment dec_flen here so it can be used in validation.
             dec_flen++
-            dec_cs += c
+            dec_cs += dec_c
             // Validation
             if dec_flen > flens[dec_fi]
                 // Field too long!
                 dec_ok = false
             else
-                if c > MAX_C
+                if dec_c > MAX_C
                     // Bad char!
                     dec_ok = false
                 else
                     // Decode a single character.
-                    dec_s = join(dec_s, letter c of chs)
+                    dec_s = join(dec_s, letter dec_c of chs)
                     // TODO: Consider doing digit check here, in lieu of (or in
                     // addition to) num check at field termination.
         else
-            if c = 0
+            if dec_c = 0
                 // Terminator found.
                 // Fld validation
                 if dec_flen = 0
@@ -161,17 +195,15 @@ Block: dec(lb, ci, f1, f2, min_nf, max_nf)
                         // Number required
                         dec_ok = false
                 if dec_ok
-                    add dec_s to ary
                     // Fld complete
                     // Note: None of this matters if not dec_ok
+                    add dec_s to ary
                     dec_nf++
                     dec_s = ''
                     dec_flen = 0
                     dec_fi++
                     if dec_fi > f2
                         dec_fi = f1
-            else
-                dec_ok = false
 
     // Final validation
     if dec_ok
@@ -191,7 +223,7 @@ Block: dec(lb, ci, f1, f2, min_nf, max_nf)
                         dec_ok = false
             
 
-// Context: non-reentrant
+// Context: Top-level
 // Assumption: ary contains cs, sn, [NAME, SCORE]...
 Block: ins(name, score)
     n = length of ary
@@ -216,38 +248,36 @@ Block: ins(name, score)
         repeat n - (MAX_SCORES * 2)
             delete last of ary
     
-// Context: non-reentrant
 // Outputs: enc_enc, enc_cs
 Block: enc(str)
-    i = 1
+    enc_i = 1
     enc_cs = 0
     enc_enc = ''
     repeat length of str
-        index_of(str[i])
-        c = index_of_res
+        indexof(str[enc_i])
+        enc_c = indexof_res
         // TODO: Perhaps check for 0, but shouldn't be able to happen.
-        cs += c
+        enc_cs += enc_c
         // Prepend leading '0' if necessary to ensure 2 digits.
-        if length of c = 1
-            c = join 0, c
-        enc_enc = join enc_enc, c
-        i++
+        if length of enc_c = 1
+            enc_c = join 0, enc_c
+        enc_enc = join enc_enc, enc_c
+        enc_i++
         
 
-// Context: non-reentrant
+// Context: Top-level
 // Outputs: encall_enc
 Block: encall
     // TODO: Consider adding a bias to cs.
     cs = 0
-    n = length of names
+    n = length of ary
     encall_enc = '00'
     
     // Encode all fields but cs, keeping up with cksum val as we go.
     i = 2
     repeat until i > n
-        encall_enc(ary[i])
-        encall_enc = join encall_enc, enc_enc
-        encall_enc = join encall_enc, '00'
+        enc(ary[i])
+        encall_enc = join encall_enc, join(enc_enc, '00')
         cs += enc_cs
         i++
     
@@ -256,5 +286,30 @@ Block: encall
     encall_enc = join enc_enc, encall_enc
     
 
+// TODO: The array chs may not longer be required, as we can loop over the
+// string just as easily.
+Block: init_chs
+    ch_str = <ascii 0x20 .. 0x7e>
+    i = 1
+    delete all of chs
+    repeat length of ch_str
+        ltr = letter i of ch_str
+        if ltr = 0
+            CH_0 = i
+        else
+            if ltr = 9
+                CH_9 = i
+        add ltr to chs
+        i++
+    MAX_C = i - 1
+
+Block: indexof(c)
+    indexof_n = length of ch_str
+    indexof_i = 1
+    indexof_res = 0
+    repeat until indexof_i > indexof_n || indexof_res > 0
+        if (letter indexof_i of ch_str) = c
+            indexof_res = indexof_i
+        indexof_i++
 
 // vim:ts=4:sw=4:et:ft=c
