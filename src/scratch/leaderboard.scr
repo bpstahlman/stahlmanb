@@ -35,7 +35,6 @@ Local:
     c      // generic char var
     s      // generic string var
     cs     // generic cksum var
-    enc    // updated and encoded leaderboard
 Function Local:
     enc_c
     enc_i
@@ -44,7 +43,6 @@ Function Local:
 Function Local:
     encall_enc
 Function Local:
-    dec_i
     dec_c
     dec_ci
     dec_n
@@ -80,7 +78,7 @@ On UpdateLeaderboard:
         else
             dec(lbs[i], 1, 1, 1, 2, 2)
         // Add unconditionally (regardless of validity) to assure proper length.
-        add dec_cidx to cis
+        add dec_ci to cis
         add dec_cs to css
         if dec_ok
             // Validate cs and sn
@@ -140,7 +138,7 @@ Block: trunc_ary(keep)
     repeat (length of ary) - keep
         delete last of ary
 
-// Inputs: lb, cidx, f1, f2, min_nf, max_nf
+// Inputs: lb, ci, f1, f2, min_nf, max_nf
 // Outputs: dec_ok, dec_ci, dec_fcnt, dec_cs
 Block: dec(lb, ci, f1, f2, min_nf, max_nf)
     dec_ci = ci
@@ -152,41 +150,36 @@ Block: dec(lb, ci, f1, f2, min_nf, max_nf)
     dec_cs = 0
     dec_ok = true
 
-    repeat until dec_ci > dec_n || not dec_ok
-        if dec_n - dec_ci < 1
-            // TODO: Odd # of digits - just check this up front.
-            dec_ok = false
+    repeat until dec_ci > dec_n || not dec_ok || (max_nf > 0 && dec_nf > max_nf)
         // Get and validate next pair of digits.
-        dec_c = ''
-        dec_i = 1
-        repeat until dec_i > 2 || not dec_ok
-            if lb[dec_ci] < CH_0 || lb[dec_ci] > CH_9
-                dec_ok = false
-            else
-                dec_c = join(dec_c, lb[dec_ci])
-            dec_i++
-            dec_ci++
-
-        if dec_c > 0
-            // Note: Increment dec_flen here so it can be used in validation.
-            dec_flen++
-            dec_cs += dec_c
-            // Validation
-            if dec_flen > flens[dec_fi]
-                // Field too long!
-                dec_ok = false
-            else
-                if dec_c > MAX_C
-                    // Bad char!
+        dec_c = join(lb[dec_ci], lb[dec_ci + 1])
+        dec_ci += 2
+        // Note: If we don't check individual digts, need to be sure the pair
+        // isn't something like `-3'.
+        if !dec_c = round(dec_c) || dec_c < 0
+            dec_ok = false
+        else
+            if dec_c > 0
+                // Note: Increment dec_flen here so it can be used in validation.
+                dec_flen++
+                dec_cs += dec_c
+                // Validation
+                if dec_flen > flens[dec_fi]
+                    // Field too long!
                     dec_ok = false
                 else
-                    // Decode a single character.
-                    dec_s = join(dec_s, letter dec_c of chs)
-                    // TODO: Consider doing digit check here, in lieu of (or in
-                    // addition to) num check at field termination.
-        else
-            if dec_c = 0
+                    if dec_c > MAX_C
+                        // Bad char!
+                        dec_ok = false
+                    else
+                        // Decode a single character.
+                        dec_s = join(dec_s, letter dec_c of ch_str)
+                        // TODO: Consider doing digit check here, in lieu of (or in
+                        // addition to) num check at field termination.
+            else
                 // Terminator found.
+                // Assumption: We've already determined we have a digit pair
+                // representing nonzero value.
                 // Fld validation
                 if dec_flen = 0
                     dec_ok = false
@@ -214,13 +207,10 @@ Block: dec(lb, ci, f1, f2, min_nf, max_nf)
             if dec_nf < min_nf
                 dec_ok = false
             else
-                if max_nf > 0 && dec_nf > max_nf
+                if dec_fi > f1
+                    // Must process whole number of f1..f2 chunks.
+                    // Note: Could have arg that governs this...
                     dec_ok = false
-                else
-                    if dec_fi > f1
-                        // Must process whole number of f1..f2 chunks.
-                        // Note: Could have arg that governs this...
-                        dec_ok = false
             
 
 // Context: Top-level
@@ -228,6 +218,7 @@ Block: dec(lb, ci, f1, f2, min_nf, max_nf)
 Block: ins(name, score)
     n = length of ary
     i = 3
+    done = false
     // Add name/score to sorted list and remove lowest scores when over limit.
     loop until i > n || done
         if !score < ary[i + 1]
@@ -237,15 +228,16 @@ Block: ins(name, score)
             done = true
         i += 2
     // Calculate excess scores
-    nn = (n - 2) / 2 - MAX_SCORES
+    nn = (length of ary - 2) / 2 - MAX_SCORES
     // Should we append current user's score?
     if !done && nn < 0
         add name to ary
         add score to ary
+        nn++
     // Delete lowest excess scores.
     // Assumption: repeat can handle neg. counts (tested).
     if nn > 0
-        repeat n - (MAX_SCORES * 2)
+        repeat nn * 2
             delete last of ary
     
 // Outputs: enc_enc, enc_cs
@@ -282,7 +274,7 @@ Block: encall
         i++
     
     // Now prepend cs
-    encall_enc(cs)
+    enc(cs)
     encall_enc = join enc_enc, encall_enc
     
 
