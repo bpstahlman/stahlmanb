@@ -304,4 +304,67 @@ Block: indexof(c)
             indexof_res = indexof_i
         indexof_i++
 
+
+On UpdateLeaderboard
+    st = waitlock
+    wd_mon
+    waitlock
+
+Block: wd_mon
+    wd_tmr = timer
+    wd_cnt = c:WrLockWd
+    repeat until !st = waitlock
+        if c:WrLockWd > wd_cnt
+            wd_tmr = timer
+        wd_cnt = c:WrLockWd
+        wait .5 seconds
+        
+
+Block: waitlock
+    ts = timer
+    WrLockPrev = c:WrLock
+    wait until !st = waitlock
+        if c:WrLock = ''
+            grablock
+        else
+            if timer - ts > LK_TMOUT
+                // Overall timeout
+                st = tmout
+                process_lb
+            else
+                if timer - wd_tmr > WD_TMOUT
+                    // Try to break lock
+                    c:WrLock = ''
+                    wait LK_BRK_TMOUT seconds
+
+
+        wait (random .1 to .2) seconds
+
+
+Block: grablock
+    c:WrLock = username
+    wait LK_READBACK_TMOUT seconds
+    if c:WrLock = username
+        st = locked
+        update
+    
+Block: update
+    // Send the old event or put that in a block.
+    process
+    // Make sure we still have lock.
+    if c:WrLock = username
+        if process_wr_idx = 1
+            c:Leaderboard1 = process_enc
+        else
+            c:Leaderboard2 = process_enc
+        st = success
+    else
+        broadcast LeaderboardAbort
+        st = abort
+
+        
+        
+
+    
+
 // vim:ts=4:sw=4:et:ft=c
