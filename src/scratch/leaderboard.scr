@@ -305,29 +305,38 @@ Block: indexof(c)
         indexof_i++
 
 
+On Start
+    st = 0
+
 On UpdateLeaderboard
+    set_username
     lock_and_update
 
 On StartWd
     wd_tmr = timer
     wd_cnt = c:WrLockWd
+    wd_usr = c:WrLock
     // Keep looping till st no longer requires watchdog.
-    repeat until not (st = trylock || st = locked)
-        if st = trylock
+    repeat until st < 1 || st > 2
+        if st = 1
             // Monitoring
-            if wd_cnt = c:WrLockWd
+            // Logic: Err on side of simplicity: if either locker or
+            // wd value changes, consider the dog petted.
+            if wd_usr = c:WrLock && wd_cnt = c:WrLockWd
                 // Keep up with time since last wd activity.
                 wd_age = timer - wd_tmr
             else
+                // Dog has been petted.
                 wd_age = 0
                 wd_tmr = timer
-                // Note: Doesn't really matter whether it's the same
-                // value that got us into the else...
+                // Note: Doesn't really matter whether values are
+                // the same ones that got us into the else...
                 wd_cnt = c:WrLockWd
+                wd_usr = c:WrLock
         else
-            if st = locked
+            if st = 2
                 // Servicing
-                // Note: Although there could be up to a WD_TICK
+                // Note: Although there could be up to a WD_SVC_TICK
                 // delay in shutting this off, there's no
                 // race-condition inherent in the changing of
                 // c:WrLockWd.
@@ -336,53 +345,64 @@ On StartWd
                     c:WrLockWd = 0
 
         // Avoid consuming unnecessary bandwidth.
-        wait WD_TICK seconds
+        // Note: Finer resolution desired when monitoring...
+        if st = 1
+            wait WD_MON_TICK seconds
+        else
+            if st = 2
+                wait WD_SVC_TICK seconds
     
 
+Block: set_username
+    if length of fake_username > 0
+        eusername = fake_username
+    else
+        eusername = username // the block
+
 Block: lock_and_update
-    st = trylock
+    st = 1
     broadcast StartWd
     WrLockPrev = c:WrLock
     ts = timer
-    wait until !st = trylock
+    wait until !st = 1
         if c:WrLock = ''
             grablock
         else
             if timer - ts > LK_TMOUT
                 // Overall timeout
-                st = tmout
+                st = 0
                 broadcast LeaderboardTimeout
             else
-                if timer - wd_tmr > WD_TMOUT
+                if wd_age > WD_TMOUT
                     // Try to break lock
                     c:WrLock = ''
                     wait LK_BRK_TMOUT seconds
 
-
-        wait (random .1 to .2) seconds
+        if st = 1
+            wait (random .1 to .2) seconds
 
 
 Block: grablock
-    c:WrLock = username
+    c:WrLock = eusername // not the username block
     wait LK_READBACK_TMOUT seconds
-    if c:WrLock = username
-        st = locked
+    if c:WrLock = eusername
+        st = 2
         update
     // else just fall through and keep trying
     
 Block: update
     // Send the old event or put that in a block.
-    process
-    // Make sure we still have lock.
-    if c:WrLock = username
-        if process_wr_idx = 1
-            c:Leaderboard1 = process_enc
+    process_lb
+    // Make sure we still have lock before attempting to write back.
+    if c:WrLock = eusername
+        if process_lb_wr_idx = 1
+            c:Leaderboard1 = process_lb_enc
         else
-            c:Leaderboard2 = process_enc
-        st = success
+            c:Leaderboard2 = process_lb_enc
+        broadcast LeaderboardSuccess
     else
-        st = abort
         broadcast LeaderboardAbort
+    st = 0
 
         
         
