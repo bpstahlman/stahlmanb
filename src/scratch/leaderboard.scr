@@ -306,31 +306,52 @@ Block: indexof(c)
 
 
 On UpdateLeaderboard
-    st = waitlock
-    wd_mon
-    waitlock
+    lock_and_update
 
-Block: wd_mon
+On StartWd
     wd_tmr = timer
     wd_cnt = c:WrLockWd
-    repeat until !st = waitlock
-        if c:WrLockWd > wd_cnt
-            wd_tmr = timer
-        wd_cnt = c:WrLockWd
-        wait .5 seconds
-        
+    // Keep looping till st no longer requires watchdog.
+    repeat until not (st = trylock || st = locked)
+        if st = trylock
+            // Monitoring
+            if wd_cnt = c:WrLockWd
+                // Keep up with time since last wd activity.
+                wd_age = timer - wd_tmr
+            else
+                wd_age = 0
+                wd_tmr = timer
+                // Note: Doesn't really matter whether it's the same
+                // value that got us into the else...
+                wd_cnt = c:WrLockWd
+        else
+            if st = locked
+                // Servicing
+                // Note: Although there could be up to a WD_TICK
+                // delay in shutting this off, there's no
+                // race-condition inherent in the changing of
+                // c:WrLockWd.
+                c:WrLockWd++
+                if c:WrLockWd > WD_MAX
+                    c:WrLockWd = 0
 
-Block: waitlock
-    ts = timer
+        // Avoid consuming unnecessary bandwidth.
+        wait WD_TICK seconds
+    
+
+Block: lock_and_update
+    st = trylock
+    broadcast StartWd
     WrLockPrev = c:WrLock
-    wait until !st = waitlock
+    ts = timer
+    wait until !st = trylock
         if c:WrLock = ''
             grablock
         else
             if timer - ts > LK_TMOUT
                 // Overall timeout
                 st = tmout
-                process_lb
+                broadcast LeaderboardTimeout
             else
                 if timer - wd_tmr > WD_TMOUT
                     // Try to break lock
@@ -347,6 +368,7 @@ Block: grablock
     if c:WrLock = username
         st = locked
         update
+    // else just fall through and keep trying
     
 Block: update
     // Send the old event or put that in a block.
@@ -359,8 +381,8 @@ Block: update
             c:Leaderboard2 = process_enc
         st = success
     else
-        broadcast LeaderboardAbort
         st = abort
+        broadcast LeaderboardAbort
 
         
         
