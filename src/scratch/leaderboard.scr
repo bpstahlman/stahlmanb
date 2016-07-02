@@ -304,6 +304,17 @@ Block: indexof(c)
             indexof_res = indexof_i
         indexof_i++
 
+Events:
+    UpdateLeaderboard
+    LeaderboardNoLogin
+    LeaderboardError
+    LeaderboardSuccess
+Globals:
+    g:Leaderboard_Score
+    g:Leaderboard_Names
+    g:Leaderboard_Scores
+    g:Leaderboard_Display
+    g:Inhibit_Leaderboard_Display
 Local Const:
     // Value at which we wrap the watchdog counter.
     // Rationale: May avoid performance penalty of very large (>64-bit)
@@ -312,6 +323,7 @@ Local Const:
     // Delay that keeps us from consuming too much bandwidth servicing the watchdog.
     // Tradeoff: Non-leaderboard processing performance (probably not much going
     // on) vs risk of unreliable monitoring.
+    // TODO: Remove this if unused.
 	WD_MON_PERIOD = 0.1
     // Delay that keeps us from consuming too much bandwidth servicing the watchdog.
     // Tradeoff: Leaderboard processing performance vs risk of someone else
@@ -352,6 +364,8 @@ On UpdateLeaderboard
     set_username
     if length of euser = 0
         broadcast LeaderboardNoLogin
+        // But go ahead and process the leaderboard for display only.
+        process_lb '', 0
     else
         lock_and_update
 
@@ -412,47 +426,6 @@ On StartWd
 
         // Avoid consuming unnecessary bandwidth when we're processing.
         // Note: Finer resolution desired when monitoring...
-        if st = 1
-            wait WD_MON_PERIOD seconds
-        else
-            if st = 2
-                wait WD_SVC_PERIOD seconds
-    
-// TODO: Consider whether more elaborate watchdog strategy is warranted.
-On StartWd_simple
-    StartWd_tmr = timer
-    StartWd_cnt = c:leaderboard_wd
-    StartWd_usr = c:leaderboard_user
-    // Keep looping till st no longer requires watchdog.
-    repeat until st < 1 || st > 2
-        if st = 1
-            // Monitoring
-            // Logic: Err on side of simplicity: if either locker or
-            // wd value changes, consider the dog petted.
-            if StartWd_usr = c:leaderboard_user && StartWd_cnt = c:leaderboard_wd
-                // Keep up with time since last wd activity.
-                wd_age = timer - StartWd_tmr
-            else
-                // Dog has been petted.
-                wd_age = 0
-                StartWd_tmr = timer
-                // Note: Doesn't really matter whether values are
-                // the same ones that got us into the else...
-                StartWd_cnt = c:leaderboard_wd
-                StartWd_usr = c:leaderboard_user
-        else
-            if st = 2
-                // Servicing
-                // Note: Although there could be up to a WD_SVC_TICK
-                // delay in shutting this off, there's no
-                // race-condition inherent in the changing of
-                // c:leaderboard_wd.
-                c:leaderboard_wd++
-                if c:leaderboard_wd > WD_MAX
-                    c:leaderboard_wd = 0
-
-        // Avoid consuming unnecessary bandwidth when we're processing.
-        // Note: Finer resolution desired when monitoring...
         if st = 2
             wait WD_SVC_PERIOD seconds
     
@@ -485,9 +458,6 @@ Block: lock_and_update
                     // existing randomization sufficient?
                     c:leaderboard_user = ''
 
-        if st = 1
-            wait (random .1 to .2) seconds
-
 
 Block: grablock
     c:leaderboard_user = euser
@@ -500,7 +470,7 @@ Block: grablock
     
 Block: update
     // Process: Put the original UpdateLeaderboard event into a process_lb block.
-    process_lb
+    process_lb euser, g:Leaderboard_Score
     // Make sure we still have lock before attempting to write back.
     if c:leaderboard_user = euser
         if process_lb_wr_idx = 1
