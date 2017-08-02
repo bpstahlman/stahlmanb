@@ -85,3 +85,5 @@ bindkey -M vicmd '^O' accept-line-and-down-history
 bindkey -M vicmd '^xr' redisplay
 
 # vim:tw=120
+
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
