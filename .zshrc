@@ -1,8 +1,14 @@
 # Lines configured by zsh-newuser-install
 HISTFILE=~/.zsh_history
-HISTSIZE=5000
-SAVEHIST=5000
-setopt appendhistory extendedglob hist_ignore_dups hist_subst_pattern prompt_subst
+HISTSIZE=10000
+SAVEHIST=10000
+setopt appendhistory hist_ignore_dups hist_subst_pattern prompt_subst
+# Double `'' to embed single quote in single-quoted strings
+setopt rc_quotes
+# Note: Different from Bash's extended glob.
+setopt extended_glob
+# Support bash-like extended glob constructs.
+setopt ksh_glob
 
 # Vi line-editing
 bindkey -v
@@ -45,6 +51,8 @@ precmd () { vcs_info }
 PS1='%F{5}[%F{2}%n%F{5}] %F{3}%3~ ${vcs_info_msg_0_}%f%# '
 
 # Source stuff that needs to be available for any script (even non-interactive).
+# TODO: Consider whether I should use .zshenv for this instead.
+# Rationale: .zprofile is sourced only for login shells.
 [[ -a ~/.zprofile ]] && . ~/.zprofile
 
 # TODO: Figure out strategy for determining when it's appropriate to switch to ~

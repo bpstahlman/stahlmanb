@@ -38,9 +38,63 @@ syntax enable
 "Use Pathogen to manage scripts
 "if exists('*pathogen#infect')
 	" TODO: Figure out why the if guard doesn't work.
-	call pathogen#infect()
+	call pathogen#infect('~/.vim/bundle/{}')
 "endif
 set rtp+=~/.fzf
+" Command for git grep
+" - fzf#vim#grep(command, with_column, [options], [fullscreen])
+command! -bang -nargs=* GGrep
+  \ call fzf#vim#grep('git grep --line-number '.shellescape(<q-args>), 0, <bang>0)
+
+" Override Colors command. You can safely do this in your .vimrc as fzf.vim
+" will not override existing commands.
+command! -bang Colors
+  \ call fzf#vim#colors({'left': '15%', 'options': '--reverse --margin 30%,0'}, <bang>0)
+
+" Augmenting Ag command using fzf#vim#with_preview function
+"   * fzf#vim#with_preview([[options], preview window, [toggle keys...]])
+"     * For syntax-highlighting, Ruby and any of the following tools are required:
+"       - Highlight: http://www.andre-simon.de/doku/highlight/en/highlight.php
+"       - CodeRay: http://coderay.rubychan.de/
+"       - Rouge: https://github.com/jneen/rouge
+"
+"   :Ag  - Start fzf with hidden preview window that can be enabled with "?" key
+"   :Ag! - Start fzf in fullscreen and display the preview window above
+command! -bang -nargs=* Ag
+  \ call fzf#vim#ag(<q-args>,
+  \                 <bang>0 ? fzf#vim#with_preview('up:60%')
+  \                         : fzf#vim#with_preview('right:50%:hidden', '?'),
+  \                 <bang>0)
+
+" Similarly, we can apply it to fzf#vim#grep. To use ripgrep instead of ag:
+command! -bang -nargs=* Rg
+  \ call fzf#vim#grep(
+  \   'rg --column --line-number --no-heading --color=always '.<q-args>, 1,
+  \   <bang>0 ? fzf#vim#with_preview('up:60%')
+  \           : fzf#vim#with_preview('right:50%:hidden', '?'),
+  \   <bang>0)
+
+" Likewise, Files command with preview window
+command! -bang -nargs=? -complete=dir Files
+  \ call fzf#vim#files(<q-args>, fzf#vim#with_preview(), <bang>0)
+fu! s:stringify_fzf_args(...)
+	return join(map(copy(a:000), 'shellescape(v:val)'), ' ')
+endfu
+
+" Similarly, we can apply it to fzf#vim#grep. To use ripgrep instead of ag:
+fu! s:stringify_fzf_args(...)
+	"return join(map(copy(a:000), 'shellescape(v:val)'), ' ')
+	return join(a:000, ' ')
+endfu
+
+" Similarly, we can apply it to fzf#vim#grep. To use ripgrep instead of ag:
+command! -bang -nargs=* Rg
+  \ call fzf#vim#grep(
+  \   'rg --column --line-number --no-heading --color=always '
+  \ . <q-args>, 1,
+  \   <bang>0 ? fzf#vim#with_preview('up:60%')
+  \           : fzf#vim#with_preview('right:50%:hidden', '?'),
+  \   <bang>0)
 
 " Slimv
 let g:paredit_disable_lisp = 1
@@ -58,8 +112,87 @@ let g:slimv_swank_cmd = '! xterm -e sbcl --load /home/bstahlman/.vim/bundle/slim
 " advantage is that it would permit me to create multiple mappings to the same
 " command.
 " Single-key mappings: h, l, H, L
-let g:sexp_expert_mode = 1
-if !g:sexp_expert_mode
+let g:which_maps = 'meta'
+let g:sexp_mode_toggle = 'K'
+let g:sexp_mode_escape = ','
+let g:sexp_mode_initial_state = 1
+if which_maps == 'meta'
+	" Note: So far, I like meta or single-key-expert best, but with meta,
+	" there's not a lot of need for sexp mode...
+	" Note: On Ubuntu, menu mappings preclude use of metafied keys for maps
+	" used in operator pending mode.
+let g:sexp_mappings = {
+    \ 'sexp_outer_list':                'af',
+    \ 'sexp_inner_list':                'if',
+    \ 'sexp_outer_top_list':            'aF',
+    \ 'sexp_inner_top_list':            'iF',
+    \ 'sexp_outer_string':              'as',
+    \ 'sexp_inner_string':              'is',
+    \ 'sexp_outer_element':             'ae',
+    \ 'sexp_inner_element':             'ie',
+    \ 'sexp_outer_child_backward':      'aC',
+    \ 'sexp_outer_child_forward':       'ac',
+    \ 'sexp_inner_child_backward':      'iC',
+    \ 'sexp_inner_child_forward':       'ic',
+    \ 'sexp_move_to_prev_bracket':      '(',
+    \ 'sexp_move_to_next_bracket':      ')',
+    \ 'sexp_move_to_prev_element_head': 'B',
+    \ 'sexp_move_to_next_element_head': 'W',
+    \ 'sexp_move_to_prev_element_tail': 'gE',
+    \ 'sexp_move_to_next_element_tail': 'E',
+    \ 'sexp_flow_to_prev_close':        '<M-J>',
+    \ 'sexp_flow_to_next_open':         '<M-j>',
+    \ 'sexp_flow_to_prev_open':         '<M-k>',
+    \ 'sexp_flow_to_next_close':        '<M-K>',
+    \ 'sexp_flow_to_prev_leaf_head':    '<M-b>',
+    \ 'sexp_flow_to_next_leaf_head':    '<M-w>',
+    \ 'sexp_flow_to_prev_leaf_tail':    '<M-g>',
+    \ 'sexp_flow_to_next_leaf_tail':    '<M-e>',
+    \ 'sexp_flow_to_prev_element_head': '<M-B>',
+    \ 'sexp_flow_to_next_element_head': '<M-W>',
+    \ 'sexp_flow_to_prev_element_tail': '<M-G>',
+    \ 'sexp_flow_to_next_element_tail': '<M-E>',
+    \ 'sexp_move_to_prev_top_element':  '<M-N>',
+    \ 'sexp_move_to_next_top_element':  '<M-n>',
+    \ 'sexp_select_prev_element':       '<M-<>',
+    \ 'sexp_select_next_element':       '<M->>',
+    \ 'sexp_indent':                    '==',
+    \ 'sexp_indent_top':                '=-',
+    \ 'sexp_indent_and_clean':          '<M-=>',
+    \ 'sexp_indent_and_clean_top':      '<M-->',
+    \ 'sexp_round_head_wrap_list':      '<LocalLeader>(',
+    \ 'sexp_round_tail_wrap_list':      '<LocalLeader>)',
+    \ 'sexp_square_head_wrap_list':     '<LocalLeader>[',
+    \ 'sexp_square_tail_wrap_list':     '<LocalLeader>]',
+    \ 'sexp_curly_head_wrap_list':      '<LocalLeader>{',
+    \ 'sexp_curly_tail_wrap_list':      '<LocalLeader>}',
+    \ 'sexp_round_head_wrap_element':   'g(',
+    \ 'sexp_round_tail_wrap_element':   'g)',
+    \ 'sexp_square_head_wrap_element':  'g[',
+    \ 'sexp_square_tail_wrap_element':  'g]',
+    \ 'sexp_curly_head_wrap_element':   'g{',
+    \ 'sexp_curly_tail_wrap_element':   'g}',
+    \ 'sexp_insert_at_list_head':       '<M-I>',
+    \ 'sexp_insert_at_list_tail':       '<M-A>',
+    \ 'sexp_splice_list':               '<M-@>',
+    \ 'sexp_convolute':                 '<M-?>',
+    \ 'sexp_clone_list_before':         'gc',
+    \ 'sexp_clone_list_after':          '',
+    \ 'sexp_clone_element_before':      'gC',
+    \ 'sexp_clone_element_after':       '',
+    \ 'sexp_raise_list':                '<M-O>',
+    \ 'sexp_raise_element':             '<M-o>',
+    \ 'sexp_swap_list_backward':        '<M-H>',
+    \ 'sexp_swap_list_forward':         '<M-L>',
+    \ 'sexp_swap_element_backward':     '<M-h>',
+    \ 'sexp_swap_element_forward':      '<M-l>',
+    \ 'sexp_emit_head_element':         '<M-{>',
+    \ 'sexp_emit_tail_element':         '<M-}>',
+    \ 'sexp_capture_prev_element':      '<M-[>',
+    \ 'sexp_capture_next_element':      '<M-]>',
+\ }
+
+elseif which_maps == 'normal'
 let g:sexp_mappings = {
     \ 'sexp_outer_list':                'af',
     \ 'sexp_inner_list':                'if',
@@ -83,18 +216,6 @@ let g:sexp_mappings = {
     \ 'sexp_flow_to_next_leaf_head':    '<M-w>',
     \ 'sexp_flow_to_prev_leaf_tail':    '<M-g>',
     \ 'sexp_flow_to_next_leaf_tail':    '<M-e>',
-    \ 'sexp_jump_to_list':              '<Space>L',
-    \ 'sexp_jump_to_list_in_top':       '<Space>l',
-    \ 'sexp_jump_to_leaf':              '<Space>E',
-    \ 'sexp_jump_to_leaf_in_top':       '<Space>e',
-    \ 'sexp_jump_to_atom':              '<Space>A',
-    \ 'sexp_jump_to_atom_in_top':       '<Space>a',
-    \ 'sexp_jump_to_string':            '<Space>S',
-    \ 'sexp_jump_to_string_in_top':     "<Space>s",
-    \ 'sexp_jump_to_comment':           '<Space>C',
-    \ 'sexp_jump_to_comment_in_top':    '<Space>c',
-    \ 'sexp_jump_to_char':              '<Space>F',
-    \ 'sexp_jump_to_char_in_top':       '<Space>f',
     \ 'sexp_move_to_prev_top_element':  '[[',
     \ 'sexp_move_to_next_top_element':  ']]',
     \ 'sexp_select_prev_element':       '[e',
@@ -119,35 +240,17 @@ let g:sexp_mappings = {
     \ 'sexp_convolute':                 '<LocalLeader>?',
     \ 'sexp_raise_list':                '<LocalLeader>o',
     \ 'sexp_raise_element':             '<LocalLeader>O',
-    \ 'sexp_swap_list_backward':        '<M-h>',
-    \ 'sexp_swap_list_forward':         '<M-l>',
-    \ 'sexp_swap_element_backward':     '<C-h>',
-    \ 'sexp_swap_element_forward':      '<C-l>',
+    \ 'sexp_swap_list_backward':        '<C-M-h>',
+    \ 'sexp_swap_list_forward':         '<C-M-l>',
+    \ 'sexp_swap_element_backward':     '<M-h>',
+    \ 'sexp_swap_element_forward':      '<M-l>',
     \ 'sexp_emit_head_element':         '<b',
     \ 'sexp_emit_tail_element':         '>b',
     \ 'sexp_capture_prev_element':      '<s',
     \ 'sexp_capture_next_element':      '>s',
 \ }
 
-"e3e008d69dbc8f774c1b180cbbdbb8fddfd2099c
-else
-    "\ 'sexp_jump_to_list':              '<Space>L',
-    "\ 'sexp_jump_to_list_in_top':       '<Space>l',
-    "\ 'sexp_jump_to_leaf':              '<Space>E',
-    "\ 'sexp_jump_to_leaf_in_top':       '<Space>e',
-    "\ 'sexp_jump_to_atom_in_top':       '<Space>A',
-    "\ 'sexp_jump_to_atom':              '<Space>a',
-    "\ 'sexp_jump_to_subword':           '<Space>W',
-    "\ 'sexp_jump_to_subword_in_top':    '<Space>w',
-    "\ 'sexp_jump_to_string':            '<Space>S',
-    "\ 'sexp_jump_to_string_in_top':     '<Space>s',
-    "\ 'sexp_jump_to_comment':           '<Space>C',
-    "\ 'sexp_jump_to_comment_in_top':    '<Space>c',
-    "\ 'sexp_jump_to_char':              '<Space>F',
-    "\ 'sexp_jump_to_char_in_top':       '<Space>f',
-let g:sexp_state_toggle = '<C-k>'
-"let g:sexp_state_toggle = 'jk'
-let g:sexp_escape_key = ','
+elseif which_maps == 'meta-expert'
 let g:sexp_mappings = {
     \ 'sexp_outer_list':                '<>af',
     \ 'sexp_inner_list':                '<>if',
@@ -163,40 +266,26 @@ let g:sexp_mappings = {
     \ 'sexp_move_to_next_element_head': 'w',
     \ 'sexp_move_to_prev_element_tail': 'ge',
     \ 'sexp_move_to_next_element_tail': 'e',
-    \ 'sexp_flow_to_prev_close':        'J',
-    \ 'sexp_flow_to_next_open':         'j',
-    \ 'sexp_flow_to_prev_open':         'k',
-    \ 'sexp_flow_to_next_close':        'K',
+    \ 'sexp_flow_to_prev_close':        '<><M-J>',
+    \ 'sexp_flow_to_next_open':         '<><M-j>',
+    \ 'sexp_flow_to_prev_open':         '<><M-k>',
+    \ 'sexp_flow_to_next_close':        '<><M-K>',
     \ 'sexp_flow_to_prev_leaf_head':    'B',
     \ 'sexp_flow_to_next_leaf_head':    'W',
     \ 'sexp_flow_to_prev_leaf_tail':    'gE',
     \ 'sexp_flow_to_next_leaf_tail':    'E',
-    \ 'sexp_jump_to_list':              '',
-    \ 'sexp_jump_to_list_in_top':       '',
-    \ 'sexp_jump_to_leaf':              '',
-    \ 'sexp_jump_to_leaf_in_top':       '',
-    \ 'sexp_jump_to_atom_in_top':       '',
-    \ 'sexp_jump_to_atom':              '',
-    \ 'sexp_jump_to_subword':           '',
-    \ 'sexp_jump_to_subword_in_top':    '',
-    \ 'sexp_jump_to_string':            '',
-    \ 'sexp_jump_to_string_in_top':     '',
-    \ 'sexp_jump_to_comment':           '',
-    \ 'sexp_jump_to_comment_in_top':    '',
-    \ 'sexp_jump_to_char':              '',
-    \ 'sexp_jump_to_char_in_top':       '',
-    \ 'sexp_move_to_prev_top_element':  'p',
+    \ 'sexp_move_to_prev_top_element':  'N',
     \ 'sexp_move_to_next_top_element':  'n',
     \ 'sexp_select_prev_element':       '<',
     \ 'sexp_select_next_element':       '>',
     \ 'sexp_indent':                    'm',
     \ 'sexp_indent_top':                'M',
-    \ 'sexp_round_head_wrap_list':      'gr',
-    \ 'sexp_round_tail_wrap_list':      'gR',
-    \ 'sexp_square_head_wrap_list':     'g[',
-    \ 'sexp_square_tail_wrap_list':     'g]',
-    \ 'sexp_curly_head_wrap_list':      'g{',
-    \ 'sexp_curly_tail_wrap_list':      'g}',
+    \ 'sexp_round_head_wrap_list':      '<M-r>',
+    \ 'sexp_round_tail_wrap_list':      '<M-R>',
+    \ 'sexp_square_head_wrap_list':     '<M-[>',
+    \ 'sexp_square_tail_wrap_list':     '<M-]>',
+    \ 'sexp_curly_head_wrap_list':      '<M-{>',
+    \ 'sexp_curly_tail_wrap_list':      '<M-}>',
     \ 'sexp_round_head_wrap_element':   'r',
     \ 'sexp_round_tail_wrap_element':   'R',
     \ 'sexp_square_head_wrap_element':  '[',
@@ -206,36 +295,84 @@ let g:sexp_mappings = {
     \ 'sexp_insert_at_list_head':       'I',
     \ 'sexp_insert_at_list_tail':       'A',
     \ 'sexp_splice_list':               '@',
-    \ 'sexp_convolute':                 'g?',
-    \ 'sexp_raise_list':                'gO',
-    \ 'sexp_raise_element':             'go',
-    \ 'sexp_swap_list_backward':        'H',
-    \ 'sexp_swap_list_forward':         'L',
+    \ 'sexp_convolute':                 '<C-@>',
+    \ 'sexp_raise_list':                '<M-O>',
+    \ 'sexp_raise_element':             '<M-o>',
+    \ 'sexp_swap_list_backward':        '<M-h>',
+    \ 'sexp_swap_list_forward':         '<M-l>',
     \ 'sexp_swap_element_backward':     '<C-h>',
     \ 'sexp_swap_element_forward':      '<C-l>',
-    \ 'sexp_emit_head_element':         'gB',
-    \ 'sexp_emit_tail_element':         'gb',
-    \ 'sexp_capture_prev_element':      'gS',
-    \ 'sexp_capture_next_element':      'gs',
+    \ 'sexp_emit_head_element':         '<M-{>',
+    \ 'sexp_emit_tail_element':         '<M-}>',
+    \ 'sexp_capture_prev_element':      '<M-[>',
+    \ 'sexp_capture_next_element':      '<M-]>',
+    \ }
+elseif which_maps == 'single-key-expert'
+	let g:sexp_mappings = {
+    \ 'sexp_outer_list':                '<>af',
+    \ 'sexp_inner_list':                '<>if',
+    \ 'sexp_outer_top_list':            '<>aF',
+    \ 'sexp_inner_top_list':            '<>iF',
+    \ 'sexp_outer_string':              '<>as',
+    \ 'sexp_inner_string':              '<>is',
+    \ 'sexp_outer_element':             '<>ae',
+    \ 'sexp_inner_element':             '<>ie',
+    \ 'sexp_move_to_prev_bracket':      'q',
+    \ 'sexp_move_to_next_bracket':      'p',
+    \ 'sexp_move_to_prev_element_head': 'b',
+    \ 'sexp_move_to_next_element_head': 'w',
+    \ 'sexp_move_to_prev_element_tail': '<M-e>',
+    \ 'sexp_move_to_next_element_tail': 'e',
+    \ 'sexp_flow_to_prev_close':        'h',
+    \ 'sexp_flow_to_next_open':         'g',
+    \ 'sexp_flow_to_prev_open':         'G',
+    \ 'sexp_flow_to_next_close':        'H',
+    \ 'sexp_flow_to_prev_leaf_head':    'B',
+    \ 'sexp_flow_to_next_leaf_head':    'W',
+    \ 'sexp_flow_to_prev_leaf_tail':    '<M-E>',
+    \ 'sexp_flow_to_next_leaf_tail':    'E',
+    \ 'sexp_move_to_prev_top_element':  'Q',
+    \ 'sexp_move_to_next_top_element':  'P',
+    \ 'sexp_select_prev_element':       '<',
+    \ 'sexp_select_next_element':       '>',
+    \ 'sexp_indent':                    'm',
+    \ 'sexp_indent_top':                'M',
+    \ 'sexp_round_head_wrap_list':      '<M-(>',
+    \ 'sexp_round_tail_wrap_list':      '<M-)>',
+    \ 'sexp_square_head_wrap_list':     '<M-[>',
+    \ 'sexp_square_tail_wrap_list':     '<M-]>',
+    \ 'sexp_curly_head_wrap_list':      '<M-{>',
+    \ 'sexp_curly_tail_wrap_list':      '<M-}>',
+    \ 'sexp_round_head_wrap_element':   '(',
+    \ 'sexp_round_tail_wrap_element':   ')',
+    \ 'sexp_square_head_wrap_element':  '[',
+    \ 'sexp_square_tail_wrap_element':  ']',
+    \ 'sexp_curly_head_wrap_element':   '{',
+    \ 'sexp_curly_tail_wrap_element':   '}',
+    \ 'sexp_insert_at_list_head':       'I',
+    \ 'sexp_insert_at_list_tail':       'i',
+    \ 'sexp_splice_list':               '!',
+    \ 'sexp_convolute':                 '@',
+    \ 'sexp_raise_list':                'R',
+    \ 'sexp_raise_element':             'r',
+    \ 'sexp_swap_list_backward':        'S',
+    \ 'sexp_swap_list_forward':         'L',
+    \ 'sexp_swap_element_backward':     's',
+    \ 'sexp_swap_element_forward':      'l',
+    \ 'sexp_emit_head_element':         'A',
+    \ 'sexp_emit_tail_element':         '"',
+    \ 'sexp_capture_prev_element':      'a',
+    \ 'sexp_capture_next_element':      '''',
     \ }
 
 endif
 
 " Easymotion
 map <Space> <Plug>(easymotion-prefix)
-" -- FZF Customization --
-" Use ripgrep instead of default ag for searches.
-command! -bang -nargs=* Rg
-  \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-heading --color=always '.shellescape(<q-args>), 1,
-  \   <bang>0 ? fzf#vim#with_preview('up:60%')
-  \           : fzf#vim#with_preview('right:50%:hidden', '?'),
-  \   <bang>0)
 
-" IMPORTANT TODO: Grep, Ctags, Cscope, etc... were written for Pikewerks
-" stuff. They're mostly generic, but a better approach would be to have some
-" sort of hook whereby .vimrc.local can tailor behavior, possibly even on
-" project-by-project basis...
+" IMPORTANT TODO: Need to decide on a more flexible strategy, which can work
+" for multiple projects/project types. Note that I'm in the process of
+" migrating to an approach built on top of fzf/ripgrep.
 
 " -- Grep --
 let pats = ['*.c', '*.h', '*.S', '*.s', '*.asm', '*.mk', 'Makefile']
@@ -444,5 +581,18 @@ endfu
 if filereadable('~/.vimrc.local')
 	so ~/.vimrc.local
 endif
+
+augroup TxtfmtInNotes
+au!
+au FileType * if expand("<amatch>") == "notes" | setlocal ft=notes.txtfmt | endif
+augroup END
+
+" TEMP DEBUG
+fu! s:Get_synstack()
+	for id in synstack(line("."), col("."))
+	   echo synIDattr(id, "name")
+	endfor
+endfu
+nmap <F8> :call <SID>Get_synstack()<CR>
 
 " vim:ts=4:sw=4:tw=78
