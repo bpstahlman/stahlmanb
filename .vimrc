@@ -106,6 +106,55 @@ let g:slimv_swank_cmd = '! xterm -e sbcl --load /home/bstahlman/.vim/bundle/slim
 "let g:slimv_swank_cmd = '! SWANK_PORT=4005 xterm -iconic -e "/usr/bin/clisp" -i "/home/bstahlman/.vim/bundle/slimv/slime/start-swank.lisp" &
 
 " Vim-sexp
+" Allow use of meta keys in terminals.
+" Explanation: When Vim processes a map lhs such as <M-j>, it converts it to
+" <Esc>j. But the terminal code received for a pressed <M-j> will actually be
+" metafied j, which needs to be converted to <Esc>j for the mapping to work.
+" Caveat: The following won't work terminals:
+" <M-[> <M->>
+" Note that while <M-[> makes sense due to its use in terminal escape
+" sequences, I'm not sure why <M->> doesn't work.
+set <M-J>=J
+set <M-j>=j
+set <M-k>=k
+set <M-K>=K
+set <M-b>=b
+set <M-w>=w
+set <M-g>=g
+set <M-e>=e
+set <M-N>=N
+set <M-n>=n
+set <M-,>=,
+set <M-.>=.
+set <M-=>==
+set <M-->=-
+set <M-I>=I
+set <M-A>=A
+set <M-@>=@
+set <M-?>=?
+set <M-C>=C
+set <M-c>=c
+set <M-O>=O
+set <M-o>=o
+set <M-H>=H
+set <M-L>=L
+set <M-h>=h
+set <M-l>=l
+set <M-t>=t
+set <M-T>=T
+set <M-p>=p
+set <M-P>=P
+
+" Timeouts
+" Rationale: By default, ttimeout is disabled (-1), which can cause problems
+" (eg) if you hit <Esc> in insert mode and hit another key (eg w or b) within
+" timeoutlen (default 1s). The solution is to specify a shorter timeout for
+" key codes.
+" Note: 'timeoutlen' will still be used for mappings, but 'ttimeoutlen'
+" determines (eg) whether <Esc>b is <Esc> followed by b or <M-b>.
+" Note: It's not necessary to set 'ttimeout' when 'timeout' is set.
+set ttimeoutlen=100
+
 " Note: For now, keeping all, in case I want to override some more.
 " Eventually, keep only the overridden entries.
 " TODO: Consider whether to use the <Plug>(...) mapping method instead. The
@@ -148,37 +197,33 @@ let g:sexp_mappings = {
     \ 'sexp_flow_to_next_leaf_head':    '<M-w>',
     \ 'sexp_flow_to_prev_leaf_tail':    '<M-g>',
     \ 'sexp_flow_to_next_leaf_tail':    '<M-e>',
-    \ 'sexp_flow_to_prev_element_head': '<M-B>',
-    \ 'sexp_flow_to_next_element_head': '<M-W>',
-    \ 'sexp_flow_to_prev_element_tail': '<M-G>',
-    \ 'sexp_flow_to_next_element_tail': '<M-E>',
     \ 'sexp_move_to_prev_top_element':  '<M-N>',
     \ 'sexp_move_to_next_top_element':  '<M-n>',
-    \ 'sexp_select_prev_element':       '<M-<>',
-    \ 'sexp_select_next_element':       '<M->>',
+    \ 'sexp_select_prev_element':       '<M-,>',
+    \ 'sexp_select_next_element':       '<M-.>',
     \ 'sexp_indent':                    '==',
     \ 'sexp_indent_top':                '=-',
     \ 'sexp_indent_and_clean':          '<M-=>',
     \ 'sexp_indent_and_clean_top':      '<M-->',
-    \ 'sexp_round_head_wrap_list':      '<LocalLeader>(',
-    \ 'sexp_round_tail_wrap_list':      '<LocalLeader>)',
-    \ 'sexp_square_head_wrap_list':     '<LocalLeader>[',
-    \ 'sexp_square_tail_wrap_list':     '<LocalLeader>]',
-    \ 'sexp_curly_head_wrap_list':      '<LocalLeader>{',
-    \ 'sexp_curly_tail_wrap_list':      '<LocalLeader>}',
-    \ 'sexp_round_head_wrap_element':   'g(',
-    \ 'sexp_round_tail_wrap_element':   'g)',
-    \ 'sexp_square_head_wrap_element':  'g[',
-    \ 'sexp_square_tail_wrap_element':  'g]',
-    \ 'sexp_curly_head_wrap_element':   'g{',
-    \ 'sexp_curly_tail_wrap_element':   'g}',
+    \ 'sexp_round_head_wrap_list':      'g(',
+    \ 'sexp_round_tail_wrap_list':      'g)',
+    \ 'sexp_square_head_wrap_list':     'g[',
+    \ 'sexp_square_tail_wrap_list':     'g]',
+    \ 'sexp_curly_head_wrap_list':      'g{',
+    \ 'sexp_curly_tail_wrap_list':      'g}',
+    \ 'sexp_round_head_wrap_element':   ',(',
+    \ 'sexp_round_tail_wrap_element':   ',)',
+    \ 'sexp_square_head_wrap_element':  ',[',
+    \ 'sexp_square_tail_wrap_element':  ',]',
+    \ 'sexp_curly_head_wrap_element':   ',{',
+    \ 'sexp_curly_tail_wrap_element':   ',}',
     \ 'sexp_insert_at_list_head':       '<M-I>',
     \ 'sexp_insert_at_list_tail':       '<M-A>',
     \ 'sexp_splice_list':               '<M-@>',
     \ 'sexp_convolute':                 '<M-?>',
-    \ 'sexp_clone_list_before':         'gc',
+    \ 'sexp_clone_list_before':         '<M-C>',
     \ 'sexp_clone_list_after':          '',
-    \ 'sexp_clone_element_before':      'gC',
+    \ 'sexp_clone_element_before':      '<M-c>',
     \ 'sexp_clone_element_after':       '',
     \ 'sexp_raise_list':                '<M-O>',
     \ 'sexp_raise_element':             '<M-o>',
@@ -186,68 +231,10 @@ let g:sexp_mappings = {
     \ 'sexp_swap_list_forward':         '<M-L>',
     \ 'sexp_swap_element_backward':     '<M-h>',
     \ 'sexp_swap_element_forward':      '<M-l>',
-    \ 'sexp_emit_head_element':         '<M-{>',
-    \ 'sexp_emit_tail_element':         '<M-}>',
-    \ 'sexp_capture_prev_element':      '<M-[>',
-    \ 'sexp_capture_next_element':      '<M-]>',
-\ }
-
-elseif which_maps == 'normal'
-let g:sexp_mappings = {
-    \ 'sexp_outer_list':                'af',
-    \ 'sexp_inner_list':                'if',
-    \ 'sexp_outer_top_list':            'aF',
-    \ 'sexp_inner_top_list':            'iF',
-    \ 'sexp_outer_string':              'as',
-    \ 'sexp_inner_string':              'is',
-    \ 'sexp_outer_element':             'ae',
-    \ 'sexp_inner_element':             'ie',
-    \ 'sexp_move_to_prev_bracket':      '(',
-    \ 'sexp_move_to_next_bracket':      ')',
-    \ 'sexp_move_to_prev_element_head': 'B',
-    \ 'sexp_move_to_next_element_head': 'W',
-    \ 'sexp_move_to_prev_element_tail': 'gE',
-    \ 'sexp_move_to_next_element_tail': 'E',
-    \ 'sexp_flow_to_prev_close':        '<M-J>',
-    \ 'sexp_flow_to_next_open':         '<M-j>',
-    \ 'sexp_flow_to_prev_open':         '<M-k>',
-    \ 'sexp_flow_to_next_close':        '<M-K>',
-    \ 'sexp_flow_to_prev_leaf_head':    '<M-b>',
-    \ 'sexp_flow_to_next_leaf_head':    '<M-w>',
-    \ 'sexp_flow_to_prev_leaf_tail':    '<M-g>',
-    \ 'sexp_flow_to_next_leaf_tail':    '<M-e>',
-    \ 'sexp_move_to_prev_top_element':  '[[',
-    \ 'sexp_move_to_next_top_element':  ']]',
-    \ 'sexp_select_prev_element':       '[e',
-    \ 'sexp_select_next_element':       ']e',
-    \ 'sexp_indent':                    '==',
-    \ 'sexp_indent_top':                '=-',
-    \ 'sexp_round_head_wrap_list':      '<LocalLeader>(',
-    \ 'sexp_round_tail_wrap_list':      '<LocalLeader>)',
-    \ 'sexp_square_head_wrap_list':     '<LocalLeader>[',
-    \ 'sexp_square_tail_wrap_list':     '<LocalLeader>]',
-    \ 'sexp_curly_head_wrap_list':      '<LocalLeader>{',
-    \ 'sexp_curly_tail_wrap_list':      '<LocalLeader>}',
-    \ 'sexp_round_head_wrap_element':   '<LocalLeader>e(',
-    \ 'sexp_round_tail_wrap_element':   '<LocalLeader>e)',
-    \ 'sexp_square_head_wrap_element':  '<LocalLeader>e[',
-    \ 'sexp_square_tail_wrap_element':  '<LocalLeader>e]',
-    \ 'sexp_curly_head_wrap_element':   '<LocalLeader>e{',
-    \ 'sexp_curly_tail_wrap_element':   '<LocalLeader>e}',
-    \ 'sexp_insert_at_list_head':       '<LocalLeader>I',
-    \ 'sexp_insert_at_list_tail':       '<LocalLeader>A',
-    \ 'sexp_splice_list':               '<LocalLeader>@',
-    \ 'sexp_convolute':                 '<LocalLeader>?',
-    \ 'sexp_raise_list':                '<LocalLeader>o',
-    \ 'sexp_raise_element':             '<LocalLeader>O',
-    \ 'sexp_swap_list_backward':        '<C-M-h>',
-    \ 'sexp_swap_list_forward':         '<C-M-l>',
-    \ 'sexp_swap_element_backward':     '<M-h>',
-    \ 'sexp_swap_element_forward':      '<M-l>',
-    \ 'sexp_emit_head_element':         '<b',
-    \ 'sexp_emit_tail_element':         '>b',
-    \ 'sexp_capture_prev_element':      '<s',
-    \ 'sexp_capture_next_element':      '>s',
+    \ 'sexp_emit_head_element':         '<M-P>',
+    \ 'sexp_emit_tail_element':         '<M-p>',
+    \ 'sexp_capture_prev_element':      '<M-T>',
+    \ 'sexp_capture_next_element':      '<M-t>',
 \ }
 
 elseif which_maps == 'meta-expert'
