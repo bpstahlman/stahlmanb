@@ -110,7 +110,7 @@ let g:slimv_swank_cmd = '! xterm -e sbcl --load /home/bstahlman/.vim/bundle/slim
 " Explanation: When Vim processes a map lhs such as <M-j>, it converts it to
 " <Esc>j. But the terminal code received for a pressed <M-j> will actually be
 " metafied j, which needs to be converted to <Esc>j for the mapping to work.
-" Caveat: The following won't work terminals:
+" Caveat: The following won't work in terminals:
 " <M-[> <M->>
 " Note that while <M-[> makes sense due to its use in terminal escape
 " sequences, I'm not sure why <M->> doesn't work.
@@ -162,9 +162,14 @@ set ttimeoutlen=100
 " command.
 " Single-key mappings: h, l, H, L
 let g:which_maps = 'meta'
-let g:sexp_mode_toggle = 'K'
+let g:sexp_mode_toggle = '<C-K>'
 let g:sexp_mode_escape = ','
-let g:sexp_mode_initial_state = 1
+let g:sexp_mode_initial_state = 0
+" TEMP DEBUG
+"au BufEnter *.* echomsg "Mapping ,s" | nmap <buffer> ,s :echo ",s"<CR>
+"au BufEnter *.* nmap <buffer> ,s :echo ",s"<CR>
+"au BufEnter *.* nmap <buffer> ,h :echo ",h"<CR>
+"au BufEnter *.* nmap <buffer> h :echo "h"<CR>
 if which_maps == 'meta'
 	" Note: So far, I like meta or single-key-expert best, but with meta,
 	" there's not a lot of need for sexp mode...
@@ -179,10 +184,10 @@ let g:sexp_mappings = {
     \ 'sexp_inner_string':              'is',
     \ 'sexp_outer_element':             'ae',
     \ 'sexp_inner_element':             'ie',
-    \ 'sexp_outer_child_backward':      'aC',
-    \ 'sexp_outer_child_forward':       'ac',
-    \ 'sexp_inner_child_backward':      'iC',
-    \ 'sexp_inner_child_forward':       'ic',
+    \ 'sexp_outer_child_tail':          'aC',
+    \ 'sexp_outer_child_head':          'ac',
+    \ 'sexp_inner_child_tail':          'iC',
+    \ 'sexp_inner_child_head':          'ic',
     \ 'sexp_move_to_prev_bracket':      '(',
     \ 'sexp_move_to_next_bracket':      ')',
     \ 'sexp_move_to_prev_element_head': 'B',
@@ -205,26 +210,26 @@ let g:sexp_mappings = {
     \ 'sexp_indent_top':                '=-',
     \ 'sexp_indent_and_clean':          '<M-=>',
     \ 'sexp_indent_and_clean_top':      '<M-->',
-    \ 'sexp_round_head_wrap_list':      'g(',
-    \ 'sexp_round_tail_wrap_list':      'g)',
-    \ 'sexp_square_head_wrap_list':     'g[',
-    \ 'sexp_square_tail_wrap_list':     'g]',
-    \ 'sexp_curly_head_wrap_list':      'g{',
-    \ 'sexp_curly_tail_wrap_list':      'g}',
-    \ 'sexp_round_head_wrap_element':   ',(',
-    \ 'sexp_round_tail_wrap_element':   ',)',
-    \ 'sexp_square_head_wrap_element':  ',[',
-    \ 'sexp_square_tail_wrap_element':  ',]',
-    \ 'sexp_curly_head_wrap_element':   ',{',
-    \ 'sexp_curly_tail_wrap_element':   ',}',
+    \ 'sexp_round_head_wrap_list':      ',(',
+    \ 'sexp_round_tail_wrap_list':      ',)',
+    \ 'sexp_square_head_wrap_list':     ',[',
+    \ 'sexp_square_tail_wrap_list':     ',]',
+    \ 'sexp_curly_head_wrap_list':      ',{',
+    \ 'sexp_curly_tail_wrap_list':      ',}',
+    \ 'sexp_round_head_wrap_element':   'g(',
+    \ 'sexp_round_tail_wrap_element':   'g)',
+    \ 'sexp_square_head_wrap_element':  'g[',
+    \ 'sexp_square_tail_wrap_element':  'g]',
+    \ 'sexp_curly_head_wrap_element':   'g{',
+    \ 'sexp_curly_tail_wrap_element':   'g}',
     \ 'sexp_insert_at_list_head':       '<M-I>',
     \ 'sexp_insert_at_list_tail':       '<M-A>',
     \ 'sexp_splice_list':               '<M-@>',
     \ 'sexp_convolute':                 '<M-?>',
-    \ 'sexp_clone_list_before':         '<M-C>',
-    \ 'sexp_clone_list_after':          '',
-    \ 'sexp_clone_element_before':      '<M-c>',
-    \ 'sexp_clone_element_after':       '',
+    \ 'sexp_clone_list':                '<LocalLeader>C',
+    \ 'sexp_clone_list_sl':             '<LocalLeader><LocalLeader>C',
+    \ 'sexp_clone_element':             '<LocalLeader>c',
+    \ 'sexp_clone_element_sl':          '<LocalLeader><LocalLeader>c',
     \ 'sexp_raise_list':                '<M-O>',
     \ 'sexp_raise_element':             '<M-o>',
     \ 'sexp_swap_list_backward':        '<M-H>',
