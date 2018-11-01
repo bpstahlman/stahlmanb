@@ -51,38 +51,52 @@
       (match (process-slat os ph i h ma)
 	[(vector ma os)
 	 ; Extra debug info
-	 ;(printf "i=~a ma=~a~n" i ma)
+	 (when (*debug*) (printf "i=~a ma=~a~n" i ma))
 	 (if (negative? h) ma (loop (add1 i) i h (rest heights) ma os))]))))
 
 (define *show-graph* (make-parameter null))
 (define *max-height* (make-parameter 20))
 (define *num-heights* (make-parameter 20))
-(define *heights* (make-parameter #f))
- 
-(command-line
-   #:program "Fence area maximizer"
-   #:once-each
-   [("-m" "--max-height") mh
-			  "Maximum slat height"
-                       (*max-height* mh)]
-   [("-n" "--num-heights") nh
-			  "Desired # of slats in fence"
-                       (*num-heights* nh)]
-   [("-g" "--show-graph")
-			  ("Show graph of output"
-			   "defaults to ON for small values of --num-heights and --max-height")
-                       (*show-graph* #t)]
-   [("-G" "--hide-graph")
-			  "Hide graph of output regardless of input sizes"
-                       (*show-graph* #f)]
-   [("-l" "--heights") hs
-			  "List of heights to use"
-			  ; TODO: Read the list...
-                       (*heights* (map (compose round string->number) (string-split hs)))]
-   #:args () #t)
+(define *heights* (make-parameter null))
+(define *debug* (make-parameter #f))
 
+(define (process-options)
+  (command-line
+    #:program "Fence area maximizer"
+    #:usage-help
+    "Find the area of the largest rectangle that can be hidden behind a fence of non-uniform slat height."
+    "...where fence is constructed from NUM-HEIGHTS random heights between 0 and MAX-HEIGHT..."
+    "...unless explicit list of heights is provided in HEIGHTS option"
+    #:once-each
+    [("-m" "--max-height") MAX-HEIGHT
+			   "Maximum slat height (default 20)"
+			   (*max-height* (round (string->number MAX-HEIGHT)))]
+    [("-n" "--num-heights") NUM-HEIGHTS
+			    "Desired # of slats in fence (default 20)"
+			    (*num-heights* (round (string->number NUM-HEIGHTS)))]
+    [("-g" "--show-graph")
+     ("Show graph of output"
+      "enabled by default for small values of --num-heights and --max-height"
+      "...unless explicitly disabled with --hide-graph")
+     (*show-graph* #t)]
+    [("-G" "--hide-graph")
+     "Hide graph of output regardless of input sizes"
+     (*show-graph* #f)]
+    [("-d" "--debug")
+     "Output helpful (but potentially voluminous) debug information"
+     (*debug* #t)]
+    [("-l" "--heights") HEIGHTS
+			"Space-separated list of non-negative integer slat heights"
+			"MAX-HEIGHT and NUM-HEIGHTS are ignored when this list is provided."
+			; TODO: Read the list...
+			(*heights* (map (compose round string->number) (string-split HEIGHTS)))]
+    #:args () (void)))
+
+(process-options)
 ; Default determined from inputs when neither --show-graph nor --hide-graph provided.
 (when (null? (*show-graph*)) (*show-graph* (and (<= (*max-height*) 70) (<= (*num-heights*) 50))))
+; If height list not provided, generate a random one, subject to constraints.
+(when (null? (*heights*)) (*heights* (take (*num-heights*) (randoms (*max-height*)))))
 
 ; Function to graph the slats horizontally
 (define (horiz-graph heights)
@@ -92,10 +106,10 @@
   (printf "~a~n" (make-string (*max-height*) #\=))
 
 ; Driver program
-(let* ([hts (take (*num-heights*) (randoms (*max-height*)))]
+(let* ([heights (take (*num-heights*) (randoms (*max-height*)))]
        [max-area (find-largest-rec (*heights*))])
   (printf "Heights: ~a~n" (sequence->list (*heights*)))
   ;(printf "~a~n" (build-string (*max-height*) (lambda (i) (integer->char (+ (char->integer #\0) (modulo i 10))))))
   (when (*show-graph*) (horiz-graph (*heights*)))
-  (printf "Max area: ~a~n" max-area))
+  (printf "Max area: ~a ~a~n" max-area (*show-graph*)))
 
