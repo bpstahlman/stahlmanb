@@ -54,22 +54,48 @@
 	 ;(printf "i=~a ma=~a~n" i ma)
 	 (if (negative? h) ma (loop (add1 i) i h (rest heights) ma os))]))))
 
+(define *show-graph* (make-parameter null))
+(define *max-height* (make-parameter 20))
+(define *num-heights* (make-parameter 20))
+(define *heights* (make-parameter #f))
+ 
+(command-line
+   #:program "Fence area maximizer"
+   #:once-each
+   [("-m" "--max-height") mh
+			  "Maximum slat height"
+                       (*max-height* mh)]
+   [("-n" "--num-heights") nh
+			  "Desired # of slats in fence"
+                       (*num-heights* nh)]
+   [("-g" "--show-graph")
+			  ("Show graph of output"
+			   "defaults to ON for small values of --num-heights and --max-height")
+                       (*show-graph* #t)]
+   [("-G" "--hide-graph")
+			  "Hide graph of output regardless of input sizes"
+                       (*show-graph* #f)]
+   [("-l" "--heights") hs
+			  "List of heights to use"
+			  ; TODO: Read the list...
+                       (*heights* (map (compose round string->number) (string-split hs)))]
+   #:args () #t)
+
+; Default determined from inputs when neither --show-graph nor --hide-graph provided.
+(when (null? (*show-graph*)) (*show-graph* (and (<= (*max-height*) 70) (<= (*num-heights*) 50))))
+
 ; Function to graph the slats horizontally
 (define (horiz-graph heights)
+  (printf "~a~n" (make-string (*max-height*) #\=))
   (for ([h heights])
     (printf "|~a (~a)~n" (make-string h #\*) h)))
+  (printf "~a~n" (make-string (*max-height*) #\=))
 
 ; Driver program
-; TODO: These should probably be optional params
-(define N 10)
-(define MAX-H 20)
-; TODO: Do I need to convert seq to list, or can I use seq functions in lieu of car?
-(let* ([heights (take N (randoms MAX-H))]
-       [max-area (find-largest-rec heights)])
-  (printf "Heights: ~a~n" (sequence->list heights))
-  (printf "~a~n" (make-string MAX-H #\=))
-  ;(printf "~a~n" (build-string MAX-H (lambda (i) (integer->char (+ (char->integer #\0) (modulo i 10))))))
-  (horiz-graph heights)
-  (printf "~a~n" (make-string MAX-H #\=))
+(let* ([hts (take (*num-heights*) (randoms (*max-height*)))]
+       [max-area (find-largest-rec (*heights*))])
+  (printf "Heights: ~a~n" (sequence->list (*heights*)))
+  ;(printf "~a~n" (build-string (*max-height*) (lambda (i) (integer->char (+ (char->integer #\0) (modulo i 10))))))
+  (when (*show-graph*) (horiz-graph (*heights*)))
   (printf "Max area: ~a~n" max-area))
 
