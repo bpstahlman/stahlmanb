@@ -14,6 +14,7 @@ PATH=~/.perl6/bin:/opt/rakudo-pkg/bin:/opt/rakudo-pkg/share/perl6/site/bin:$PATH
 # manager.
 # TODO: Probably just remove Ubuntu's.
 PATH=~/racket/bin:$PATH
+PATH=~/anarki:$PATH
 export PATH
 
 export STACK_INSTALL_PATH=~/.local/bin
