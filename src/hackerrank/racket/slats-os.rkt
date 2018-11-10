@@ -1,59 +1,18 @@
 #lang racket
+; TODO: Something wonky about the ftree require paths...
+; IMPORTANT NOTE: Finger trees are NOT necessary. The list-only version of this
+; algorithm (slats2.rkt) is actually slightly faster.
+(require ftree/ftree/ftree)
+(require ftree/orderedseq/orderedseq)
 (require racket/match)
 (require data/collection)
 
 ; Slat consists of index and height
 (struct slat (i h))
 
-; Fully process the open slats above cutoff height to see whether any gives a
-; new max-area. Slats are discarded after processing, but the earliest slat
-; will be "trimmed" and added (retroactively) to the set of open slats if and
-; only if the tallest preceding open slat is *lower* than the cutoff height.
-; Rationale: A slat that juts above its predecessor by more than a single
-; height unit could begin multiple rectangles. A naive approach would simply
-; add all these potential rectangles at the index of the jutting slat. But this
-; would be extremely wasteful. Consider that when multiple rectangles start and
-; end at the same index, only the tallest matters. Since we don't yet know
-; where each of the rectangles beginning with the jutting slat will be closed,
-; we can't yet know which will be needed. By adding only the full slat
-; (representing the tallest rectangle) proactively, we avoid adding *many*
-; useless rectangles. Of course, this strategy requires that we add a potential
-; rectangle retroactively when we notice that it extends past all taller
-; rectangles that began where it did, *and* there's not already an open slat of
-; the same height at an earlier index (rendering the trimmed one irrelevant).
-; Precondition: Both slat height and index increase towards list head.
-; Precondition: Descent guarantees existence of at least 1 element in os.
-; Inputs:
-;   i   index of cutoff slat
-;   h   cutoff height
-;   os  list of open slats
-;   ma  current max area
-; Return:
-;   os  updated list of open slats
-;   ma  updated max area
-(define (close-rects i h os ma)
-  (for/fold
-    ([ma ma]
-     [el #f] ; >=1 iterations guaranteed
-     [os os]
-     #:result (values
-		ma
-		(if (or (empty? os)
-			(< (slat-h (car os)) h))
-		  (cons (struct-copy slat el [h h]) os)
-		  os)))
-    ([el-n os]
-     ; If we break here, os hasn't been updated: i.e., car in result clause
-     ; will be the el-n that caused break.
-     #:break (> h (slat-h el-n)))
-    ; Deconstruct and process next slat, which will be either discarded (here)
-    ; or trimmed/added retroactively (in result clause).
-    (values (match el-n
-	      [(struct slat (ii hh))
-	       (let ([a (* (- i ii) hh)])
-		 (if (> a ma) a ma))])
-	    el-n
-	    (cdr os))))
+; Comparator function to sort slats by height (increasing)
+(define (cmp-slats a b)
+  (< (slat-h a) (slat-h b)))
 
 ; Process a single slat. If a new rectangle is opening, add it to the ordered
 ; set; if rectangles are closing, iterate them, updating max-area as necessary.
@@ -64,29 +23,58 @@
 ; Rationale: Obviates need to open many rectangles proactively when a slat that
 ; juts far above its predecessor is encountered. Adding retroactively allows us
 ; to add only the ones that are ultimately needed.
-; Inputs:
-;   os        list of open slats
-;   ph        prev slat height
-;   i         current slat index
-;   h         current slat index
-;   ma        current max area
+;
 ; Return:
-;   max-area  updated max area
-;   os        updated list of open slats
+;   max-area
+;   open-rectangles-ordered-set
 (define (process-one-slat os ph i h ma)
   (cond
     [(> h ph) ; ascent - open rectangles
-     [values ma (cons (slat i h) os)]]
+     [values ma (os-insert (slat i h) os)]]
     [(= h ph) ; flatline - nop
      (values ma os)]
     [else     ; descent - close rectangles
-      (close-rects i h os ma)]))
+      (let*-values
+	([(os-o os-c) (os-partition (slat i (add1 h)) os)]
+	 [(ma i-low)
+	  ; Process closed slats to see whether any gives a new max-area.
+	  ; Keep track of low index, since if cutoff height is greater than
+	  ; largest open slat, we'll need to shorten this low index slat
+	  ; to the cutoff height and re-add to set of opens.
+	  ; TODO: Consider factoring this into a function. Actually, might
+	  ; refactor higher levels of this function into caller.
+	  (let loop ([ma ma] [i-low #f] [os-c os-c])
+	    (if (ft-empty? os-c)
+	      (values ma i-low)
+	      (let-values
+		([(ma i-low)
+		  (match (ft-hdL os-c)
+		    [(struct slat (ii hh))
+		     (let ([a (* (- i ii) hh)])
+		       (values (if (> a ma) a ma)
+			       (if (or (not i-low) (< ii i-low)) ii i-low)))])])
+		(loop ma i-low (ft-tlL os-c)))))])
+	(values
+	  ma
+	  ; Retroactively open a rectangle partway up the first slat in the
+	  ; closing set, but only if the latest of the still open slats is
+	  ; lower than current slat (or doesn't exist, as in the case of first
+	  ; slat).
+	  ; Rationale: No point in adding rect start retroactively if there's
+	  ; an earlier slat with same height.
+	  ; Assumption: slats in ordered sets are always ascending with index.
+	  ; Assumption: It's impossible for i-low to be #f here.
+	  ; Rationale: Descent implies something in os.
+	  (if (or (os-empty? os-o)
+		  (< (slat-h (os-top os-o)) h))
+	    (os-insert (slat i-low h) os-o)
+	    os-o)))]))
 
 ; Find largest rectangle in input sequence of slat heights.
 (define (find-largest-rec heights)
   ; Iterate slat heights.
   ; i=index, pi=prev-index, ph=prev-height ma=max-area os=ordered-set
-  (let loop ([i 0] [pi -1] [ph -1] [heights heights] [ma 0] [os '()])
+  (let loop ([i 0] [pi -1] [ph -1] [heights heights] [ma 0] [os (mk-oseq cmp-slats)])
     ; Get current height (-1 if virtual slat just past end)
     (let ([h (if (empty? heights) -1 (first heights))]
 	  [pma ma])
