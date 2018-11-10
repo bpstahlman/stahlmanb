@@ -57,18 +57,13 @@
 
 ; Process a single slat. If a new rectangle is opening, add it to the ordered
 ; set; if rectangles are closing, iterate them, updating max-area as necessary.
-; Upon return, any closed rectangles are removed from the ordered set, with the
-; caveat that we may need to convert the slat at the earliest index to a
-; shorter slat (provided no slat of that height exists at a lower index) and
-; add it retroactively to the set of open slats.
-; Rationale: Obviates need to open many rectangles proactively when a slat that
-; juts far above its predecessor is encountered. Adding retroactively allows us
-; to add only the ones that are ultimately needed.
+; Upon return, any fully processed rectangles have been removed from the
+; ordered set.
 ; Inputs:
 ;   os        list of open slats
 ;   ph        prev slat height
 ;   i         current slat index
-;   h         current slat index
+;   h         current slat height
 ;   ma        current max area
 ; Return:
 ;   max-area  updated max area
@@ -83,6 +78,10 @@
       (close-rects i h os ma)]))
 
 ; Find largest rectangle in input sequence of slat heights.
+; Note: Though the "finger tree" ordered sets used in the original
+; implementation have been replaced with simple lists, I've retained the
+; nomenclature "os" because it's short, and the lists do represent ordered
+; sets.
 (define (find-largest-rec heights)
   ; Iterate slat heights.
   ; i=index, pi=prev-index, ph=prev-height ma=max-area os=ordered-set
@@ -90,6 +89,7 @@
     ; Get current height (-1 if virtual slat just past end)
     (let ([h (if (empty? heights) -1 (first heights))]
 	  [pma ma])
+      ; Process current slat, updating both max-area and open slat list.
       (let-values ([(ma os) (process-one-slat os ph i h ma)])
 	; Show max-area increases if debugging.
 	(when (and (*debug*) (> ma pma)) (printf "i=~a ma=~a~n" i ma))
